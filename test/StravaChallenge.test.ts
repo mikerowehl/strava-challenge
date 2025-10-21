@@ -13,11 +13,11 @@ describe("StravaChallenge", function() {
   let participant3: Signer;
 
   // Common challenge parameters
-  let challengeId: string;
+  let challengeId: number;
   let startTime: number;
   let endTime: number;
   const stakeAmount = ethers.parseEther("0.1");
-  const minParticipants = 2;
+  let allowedAddresses: string[];
 
   beforeEach(async function() {
     // Get signers
@@ -32,8 +32,8 @@ describe("StravaChallenge", function() {
     startTime = now + 3600; // 1 hour from now
     endTime = startTime + 7 * 24 * 3600; // 1 week after start
 
-    // Generate unique challenge ID
-    challengeId = ethers.keccak256(ethers.toUtf8Bytes("test-challenge-1"));
+    // Set up allowed participants (participant1 and participant2 by default)
+    allowedAddresses = [participant1.address, participant2.address];
   });
 
   describe("Deployment", function() {
@@ -44,16 +44,25 @@ describe("StravaChallenge", function() {
 
   describe("Challenge Creation", function() {
     it("Should create a challenge with valid parameters", async function() {
-      await expect(
-        stravaChallenge.connect(creator).createChallenge(
-          challengeId,
-          startTime,
-          endTime,
-          stakeAmount,
-          minParticipants
-        )
-      ).to.emit(stravaChallenge, "ChallengeCreated")
-        .withArgs(challengeId, creator.address, startTime, endTime, stakeAmount, minParticipants);
+      const tx = await stravaChallenge.connect(creator).createChallenge(
+        startTime,
+        endTime,
+        stakeAmount,
+        allowedAddresses
+      );
+
+      const receipt = await tx.wait();
+      const event = receipt!.logs.find((log: any) => {
+        try {
+          return stravaChallenge.interface.parseLog(log)?.name === "ChallengeCreated";
+        } catch {
+          return false;
+        }
+      });
+      const parsedEvent = stravaChallenge.interface.parseLog(event!);
+      challengeId = parsedEvent!.args[0]; // First arg is challengeId
+
+      expect(challengeId).to.equal(0); // First challenge has ID 0
 
       const challenge = await stravaChallenge.challenges(challengeId);
       expect(challenge.id).to.equal(challengeId);
@@ -61,30 +70,52 @@ describe("StravaChallenge", function() {
       expect(challenge.startTime).to.equal(startTime);
       expect(challenge.endTime).to.equal(endTime);
       expect(challenge.stakeAmount).to.equal(stakeAmount);
-      expect(challenge.minParticipants).to.equal(minParticipants);
       expect(challenge.totalStaked).to.equal(0);
       expect(challenge.state).to.equal(0); // PENDING
       expect(challenge.participantCount).to.equal(0);
+
+      // Verify whitelist
+      const allowedList = await stravaChallenge.getAllowedParticipants(challengeId);
+      expect(allowedList).to.have.lengthOf(2);
+      expect(allowedList).to.include(participant1.address);
+      expect(allowedList).to.include(participant2.address);
     });
 
-    it("Should revert if challenge ID already exists", async function() {
-      await stravaChallenge.connect(creator).createChallenge(
-        challengeId,
+    it("Should allow multiple challenges to be created with auto-incrementing IDs", async function() {
+      const tx1 = await stravaChallenge.connect(creator).createChallenge(
         startTime,
         endTime,
         stakeAmount,
-        minParticipants
+        allowedAddresses
       );
+      const receipt1 = await tx1.wait();
+      const event1 = receipt1!.logs.find((log: any) => {
+        try {
+          return stravaChallenge.interface.parseLog(log)?.name === "ChallengeCreated";
+        } catch {
+          return false;
+        }
+      });
+      const id1 = stravaChallenge.interface.parseLog(event1!)!.args[0];
 
-      await expect(
-        stravaChallenge.connect(creator).createChallenge(
-          challengeId,
-          startTime,
-          endTime,
-          stakeAmount,
-          minParticipants
-        )
-      ).to.be.revertedWith("Challenge already exists");
+      const tx2 = await stravaChallenge.connect(creator).createChallenge(
+        startTime + 100,
+        endTime,
+        stakeAmount,
+        allowedAddresses
+      );
+      const receipt2 = await tx2.wait();
+      const event2 = receipt2!.logs.find((log: any) => {
+        try {
+          return stravaChallenge.interface.parseLog(log)?.name === "ChallengeCreated";
+        } catch {
+          return false;
+        }
+      });
+      const id2 = stravaChallenge.interface.parseLog(event2!)!.args[0];
+
+      expect(id1).to.equal(0);
+      expect(id2).to.equal(1);
     });
 
     it("Should revert if start time is in the past", async function() {
@@ -94,11 +125,10 @@ describe("StravaChallenge", function() {
 
       await expect(
         stravaChallenge.connect(creator).createChallenge(
-          challengeId,
           pastTime,
           endTime,
           stakeAmount,
-          minParticipants
+          allowedAddresses
         )
       ).to.be.revertedWith("Start time must be in future");
     });
@@ -108,11 +138,10 @@ describe("StravaChallenge", function() {
 
       await expect(
         stravaChallenge.connect(creator).createChallenge(
-          challengeId,
           startTime,
           invalidEndTime,
           stakeAmount,
-          minParticipants
+          allowedAddresses
         )
       ).to.be.revertedWith("End time must be after start");
     });
@@ -120,66 +149,62 @@ describe("StravaChallenge", function() {
     it("Should revert if stake amount is zero", async function() {
       await expect(
         stravaChallenge.connect(creator).createChallenge(
-          challengeId,
           startTime,
           endTime,
           0,
-          minParticipants
+          allowedAddresses
         )
       ).to.be.revertedWith("Stake must be positive");
     });
 
-    it("Should revert if minimum participants is less than 2", async function() {
+    it("Should revert if allowed participants list has less than 2 addresses", async function() {
       await expect(
         stravaChallenge.connect(creator).createChallenge(
-          challengeId,
           startTime,
           endTime,
           stakeAmount,
-          1
+          [participant1.address]
         )
       ).to.be.revertedWith("Need at least 2 participants");
     });
 
-    it("Should allow multiple different challenges to be created", async function() {
-      const challengeId2 = ethers.keccak256(ethers.toUtf8Bytes("test-challenge-2"));
-      const startTime2 = startTime + 200;
-
-      await stravaChallenge.connect(creator).createChallenge(
-        challengeId,
-        startTime,
-        endTime,
-        stakeAmount,
-        minParticipants
-      );
-
+    it("Should revert if whitelist contains zero address", async function() {
       await expect(
         stravaChallenge.connect(creator).createChallenge(
-          challengeId2,
-          startTime2,
+          startTime,
           endTime,
           stakeAmount,
-          minParticipants
+          [participant1.address, ethers.ZeroAddress]
         )
-      ).to.emit(stravaChallenge, "ChallengeCreated");
+      ).to.be.revertedWith("Invalid address in whitelist");
+    });
 
-      const challenge1 = await stravaChallenge.challenges(challengeId);
-      const challenge2 = await stravaChallenge.challenges(challengeId2);
-
-      expect(challenge1.startTime).to.equal(startTime);
-      expect(challenge2.startTime).to.equal(startTime2);
+    it("Should revert if whitelist contains duplicate addresses", async function() {
+      await expect(
+        stravaChallenge.connect(creator).createChallenge(
+          startTime,
+          endTime,
+          stakeAmount,
+          [participant1.address, participant1.address]
+        )
+      ).to.be.revertedWith("Duplicate address in whitelist");
     });
   });
 
   describe("Joining Challenges", function() {
     beforeEach(async function() {
       // Create a challenge before each test
-      await stravaChallenge.connect(creator).createChallenge(
-        challengeId,
+      challengeId = await stravaChallenge.connect(creator).createChallenge.staticCall(
         startTime,
         endTime,
         stakeAmount,
-        minParticipants
+        allowedAddresses
+      );
+      await stravaChallenge.connect(creator).createChallenge(
+        startTime,
+        endTime,
+        stakeAmount,
+        allowedAddresses
       );
     });
 
@@ -234,7 +259,7 @@ describe("StravaChallenge", function() {
     });
 
     it("Should revert if challenge does not exist", async function() {
-      const nonExistentId = ethers.keccak256(ethers.toUtf8Bytes("nonexistent"));
+      const nonExistentId = 999; // Far beyond any created challenge
 
       await expect(
         stravaChallenge.connect(participant1).joinChallenge(nonExistentId, "strava123", {
@@ -244,7 +269,7 @@ describe("StravaChallenge", function() {
     });
 
     it("Should revert if challenge is not in PENDING state (after start time)", async function() {
-      // Join participants first
+      // Join both whitelisted participants first
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
@@ -256,15 +281,17 @@ describe("StravaChallenge", function() {
       await ethers.provider.send("evm_setNextBlockTimestamp", [startTime]);
       await ethers.provider.send("evm_mine", []);
 
+      // Now the challenge is ACTIVE - even a whitelisted user can't join
+      // But participant1 already joined, so they should get "Already joined"
       await expect(
-        stravaChallenge.connect(participant3).joinChallenge(challengeId, "strava789", {
+        stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava-new", {
           value: stakeAmount
         })
       ).to.be.revertedWith("Challenge not accepting participants");
     });
 
     it("Should revert if registration period has ended", async function() {
-      // Need at least minimum participants for it to not be cancelled
+      // Join all whitelisted participants
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
@@ -276,9 +303,9 @@ describe("StravaChallenge", function() {
       await ethers.provider.send("evm_setNextBlockTimestamp", [startTime + 1]);
       await ethers.provider.send("evm_mine", []);
 
-      // Now the challenge is ACTIVE, so joining should fail with "Challenge not accepting participants"
+      // Now the challenge is ACTIVE - even a whitelisted user can't join
       await expect(
-        stravaChallenge.connect(participant3).joinChallenge(challengeId, "strava789", {
+        stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava-new-id", {
           value: stakeAmount
         })
       ).to.be.revertedWith("Challenge not accepting participants");
@@ -313,16 +340,29 @@ describe("StravaChallenge", function() {
         })
       ).to.be.revertedWith("Invalid Strava ID");
     });
+
+    it("Should revert if user is not on the whitelist", async function() {
+      await expect(
+        stravaChallenge.connect(participant3).joinChallenge(challengeId, "strava789", {
+          value: stakeAmount
+        })
+      ).to.be.revertedWith("Not on whitelist");
+    });
   });
 
   describe("Lazy State Evaluation", function() {
     beforeEach(async function() {
-      await stravaChallenge.connect(creator).createChallenge(
-        challengeId,
+      challengeId = await stravaChallenge.connect(creator).createChallenge.staticCall(
         startTime,
         endTime,
         stakeAmount,
-        minParticipants
+        allowedAddresses
+      );
+      await stravaChallenge.connect(creator).createChallenge(
+        startTime,
+        endTime,
+        stakeAmount,
+        allowedAddresses
       );
     });
 
@@ -426,12 +466,17 @@ describe("StravaChallenge", function() {
 
   describe("Withdrawal from Cancelled Challenge", function() {
     beforeEach(async function() {
-      await stravaChallenge.connect(creator).createChallenge(
-        challengeId,
+      challengeId = await stravaChallenge.connect(creator).createChallenge.staticCall(
         startTime,
         endTime,
         stakeAmount,
-        minParticipants
+        allowedAddresses
+      );
+      await stravaChallenge.connect(creator).createChallenge(
+        startTime,
+        endTime,
+        stakeAmount,
+        allowedAddresses
       );
     });
 

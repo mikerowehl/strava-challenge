@@ -18,12 +18,11 @@ contract StravaChallenge {
     }
 
     struct Challenge {
-        bytes32 id;
+        uint256 id;
         address creator;
         uint256 startTime;
         uint256 endTime;
         uint256 stakeAmount;
-        uint256 minParticipants;
         uint256 totalStaked;
         ChallengeState state;
         address winner;
@@ -38,14 +37,14 @@ contract StravaChallenge {
         bool hasJoined;
     }
 
-    // challengeId => Challenge
-    mapping(bytes32 => Challenge) public challenges;
-    
+    // Array of all challenges
+    Challenge[] public challenges;
+
     // challengeId => userAddress => Participant
-    mapping(bytes32 => mapping(address => Participant)) public participants;
-    
-    // challengeId => array of participant addresses
-    mapping(bytes32 => address[]) public participantList;
+    mapping(uint256 => mapping(address => Participant)) public participants;
+
+    // challengeId => array of allowed addresses
+    mapping(uint256 => address[]) public allowedParticipantsList;
 
     // Oracle address that can submit results
     address public oracle;
@@ -57,37 +56,37 @@ contract StravaChallenge {
     uint256 public constant EMERGENCY_PERIOD = 14 days;
 
     event ChallengeCreated(
-        bytes32 indexed challengeId,
+        uint256 indexed challengeId,
         address indexed creator,
         uint256 startTime,
         uint256 endTime,
         uint256 stakeAmount,
-        uint256 minParticipants
+        uint256 allowedParticipantsCount
     );
-    
+
     event ParticipantJoined(
-        bytes32 indexed challengeId,
+        uint256 indexed challengeId,
         address indexed participant,
         string stravaUserId
     );
-    
+
     event ChallengeFinalized(
-        bytes32 indexed challengeId,
+        uint256 indexed challengeId,
         address indexed winner,
         bytes32 dataHash,
         uint256 prizeAmount
     );
-    
-    event ChallengeCancelled(bytes32 indexed challengeId);
-    
+
+    event ChallengeCancelled(uint256 indexed challengeId);
+
     event PrizeClaimed(
-        bytes32 indexed challengeId,
+        uint256 indexed challengeId,
         address indexed winner,
         uint256 amount
     );
-    
+
     event EmergencyWithdrawal(
-        bytes32 indexed challengeId,
+        uint256 indexed challengeId,
         address indexed participant,
         uint256 amount
     );
@@ -97,7 +96,8 @@ contract StravaChallenge {
         _;
     }
 
-    modifier onlyCreator(bytes32 challengeId) {
+    modifier onlyCreator(uint256 challengeId) {
+        require(challengeId < challenges.length, "Challenge does not exist");
         require(msg.sender == challenges[challengeId].creator, "Only creator can call");
         _;
     }
@@ -107,39 +107,50 @@ contract StravaChallenge {
     }
 
     /**
-     * @notice Create a new challenge with hashed ID
-     * @param challengeId Hashed challenge identifier (for privacy)
+     * @notice Create a new challenge with a whitelist of allowed participants
      * @param startTime Unix timestamp when challenge starts
      * @param endTime Unix timestamp when challenge ends
      * @param stakeAmount Amount each participant must stake (in wei)
-     * @param minParticipants Minimum number of participants needed
+     * @param allowedAddresses Array of addresses allowed to join this challenge
+     * @return challengeId The ID of the newly created challenge
      */
     function createChallenge(
-        bytes32 challengeId,
         uint256 startTime,
         uint256 endTime,
         uint256 stakeAmount,
-        uint256 minParticipants
-    ) external {
-        require(challenges[challengeId].creator == address(0), "Challenge already exists");
+        address[] calldata allowedAddresses
+    ) external returns (uint256 challengeId) {
         require(startTime > block.timestamp, "Start time must be in future");
         require(endTime > startTime, "End time must be after start");
         require(stakeAmount > 0, "Stake must be positive");
-        require(minParticipants >= 2, "Need at least 2 participants");
+        require(allowedAddresses.length >= 2, "Need at least 2 participants");
 
-        challenges[challengeId] = Challenge({
+        challengeId = challenges.length;
+
+        challenges.push(Challenge({
             id: challengeId,
             creator: msg.sender,
             startTime: startTime,
             endTime: endTime,
             stakeAmount: stakeAmount,
-            minParticipants: minParticipants,
             totalStaked: 0,
             state: ChallengeState.PENDING,
             winner: address(0),
             finalDataHash: bytes32(0),
             participantCount: 0
-        });
+        }));
+
+        // Store allowed participants and check for duplicates
+        for (uint256 i = 0; i < allowedAddresses.length; i++) {
+            require(allowedAddresses[i] != address(0), "Invalid address in whitelist");
+
+            // Check for duplicates by searching array
+            for (uint256 j = 0; j < i; j++) {
+                require(allowedAddresses[j] != allowedAddresses[i], "Duplicate address in whitelist");
+            }
+
+            allowedParticipantsList[challengeId].push(allowedAddresses[i]);
+        }
 
         emit ChallengeCreated(
             challengeId,
@@ -147,8 +158,25 @@ contract StravaChallenge {
             startTime,
             endTime,
             stakeAmount,
-            minParticipants
+            allowedAddresses.length
         );
+    }
+
+    /**
+     * @notice Check if an address is allowed to join a challenge
+     * @param challengeId The challenge ID
+     * @param addr The address to check
+     * @return bool True if address is in the whitelist
+     */
+    function isAllowedParticipant(uint256 challengeId, address addr) public view returns (bool) {
+        require(challengeId < challenges.length, "Challenge does not exist");
+        address[] memory allowed = allowedParticipantsList[challengeId];
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (allowed[i] == addr) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -157,7 +185,8 @@ contract StravaChallenge {
      * @param challengeId The challenge ID
      * @return ChallengeState The effective current state
      */
-    function getEffectiveState(bytes32 challengeId) public view returns (ChallengeState) {
+    function getEffectiveState(uint256 challengeId) public view returns (ChallengeState) {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
         ChallengeState storedState = challenge.state;
 
@@ -168,10 +197,13 @@ contract StravaChallenge {
             return storedState;
         }
 
-        // Check if challenge should be cancelled (insufficient participants after start time)
+        // Get the number of required participants (whitelist length)
+        uint256 requiredParticipants = allowedParticipantsList[challengeId].length;
+
+        // Check if challenge should be cancelled (not all whitelisted participants joined after start time)
         if (storedState == ChallengeState.PENDING &&
             block.timestamp >= challenge.startTime &&
-            challenge.participantCount < challenge.minParticipants) {
+            challenge.participantCount < requiredParticipants) {
             return ChallengeState.CANCELLED;
         }
 
@@ -180,7 +212,7 @@ contract StravaChallenge {
             return ChallengeState.GRACE_PERIOD;
         }
 
-        // Check if challenge should be active (started with enough participants)
+        // Check if challenge should be active (started with all participants)
         if (block.timestamp >= challenge.startTime) {
             return ChallengeState.ACTIVE;
         }
@@ -195,12 +227,12 @@ contract StravaChallenge {
      * @param stravaUserId Your Strava user ID
      */
     function joinChallenge(
-        bytes32 challengeId,
+        uint256 challengeId,
         string calldata stravaUserId
     ) external payable {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
-
-        require(challenge.creator != address(0), "Challenge does not exist");
+        require(isAllowedParticipant(challengeId, msg.sender), "Not on whitelist");
         require(getEffectiveState(challengeId) == ChallengeState.PENDING, "Challenge not accepting participants");
         require(block.timestamp < challenge.startTime, "Registration closed");
         require(msg.value == challenge.stakeAmount, "Incorrect stake amount");
@@ -214,7 +246,6 @@ contract StravaChallenge {
             hasJoined: true
         });
 
-        participantList[challengeId].push(msg.sender);
         challenge.totalStaked += msg.value;
         challenge.participantCount++;
 
@@ -230,10 +261,11 @@ contract StravaChallenge {
      * @param dataHash Hash of all participant confirmations/results
      */
     function finalizeChallenge(
-        bytes32 challengeId,
+        uint256 challengeId,
         address winner,
         bytes32 dataHash
     ) external onlyOracle {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
 
         require(
@@ -273,12 +305,13 @@ contract StravaChallenge {
      * @param oracleSignature Oracle's signature of the finalization data
      */
     function claimPrizeWithSignature(
-        bytes32 challengeId,
+        uint256 challengeId,
         address winner,
         bytes32 dataHash,
         uint256 timestamp,
         bytes calldata oracleSignature
     ) external {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
 
         require(
@@ -334,7 +367,8 @@ contract StravaChallenge {
      * @notice Winner claims their prize (for already-finalized challenges)
      * @param challengeId The challenge to claim from
      */
-    function claimPrize(bytes32 challengeId) external {
+    function claimPrize(uint256 challengeId) external {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
         
         require(challenge.state == ChallengeState.FINALIZED, "Challenge not finalized");
@@ -355,9 +389,10 @@ contract StravaChallenge {
      * @param signatures Array of signatures from ALL participants
      */
     function cancelChallengeByConsent(
-        bytes32 challengeId,
+        uint256 challengeId,
         bytes[] calldata signatures
     ) external {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
         ChallengeState effectiveState = getEffectiveState(challengeId);
 
@@ -403,7 +438,8 @@ contract StravaChallenge {
      * @dev Lazily updates stored state to CANCELLED on first withdrawal if needed
      * @param challengeId The challenge to withdraw from
      */
-    function withdrawFromCancelled(bytes32 challengeId) external {
+    function withdrawFromCancelled(uint256 challengeId) external {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
         Participant storage participant = participants[challengeId][msg.sender];
 
@@ -427,7 +463,8 @@ contract StravaChallenge {
      * @notice Emergency withdrawal if oracle fails to finalize
      * @param challengeId The challenge to withdraw from
      */
-    function emergencyWithdraw(bytes32 challengeId) external {
+    function emergencyWithdraw(uint256 challengeId) external {
+        require(challengeId < challenges.length, "Challenge does not exist");
         Challenge storage challenge = challenges[challengeId];
         Participant storage participant = participants[challengeId][msg.sender];
         ChallengeState effectiveState = getEffectiveState(challengeId);
@@ -463,12 +500,45 @@ contract StravaChallenge {
     }
 
     /**
-     * @notice Get list of all participants in a challenge
+     * @notice Get list of all participants who have joined a challenge
+     * @dev Iterates through allowed participants and returns those who actually joined
      * @param challengeId The challenge ID
-     * @return Array of participant addresses
+     * @return Array of participant addresses who have joined
      */
-    function getParticipants(bytes32 challengeId) external view returns (address[] memory) {
-        return participantList[challengeId];
+    function getParticipants(uint256 challengeId) external view returns (address[] memory) {
+        require(challengeId < challenges.length, "Challenge does not exist");
+
+        address[] memory allowed = allowedParticipantsList[challengeId];
+        uint256 joinedCount = 0;
+
+        // First pass: count how many have joined
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (participants[challengeId][allowed[i]].hasJoined) {
+                joinedCount++;
+            }
+        }
+
+        // Second pass: build the result array
+        address[] memory result = new address[](joinedCount);
+        uint256 index = 0;
+        for (uint256 i = 0; i < allowed.length; i++) {
+            if (participants[challengeId][allowed[i]].hasJoined) {
+                result[index] = allowed[i];
+                index++;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * @notice Get list of allowed participants for a challenge
+     * @param challengeId The challenge ID
+     * @return Array of allowed addresses
+     */
+    function getAllowedParticipants(uint256 challengeId) external view returns (address[] memory) {
+        require(challengeId < challenges.length, "Challenge does not exist");
+        return allowedParticipantsList[challengeId];
     }
 
     /**
@@ -478,9 +548,10 @@ contract StravaChallenge {
      * @return Participant struct
      */
     function getParticipant(
-        bytes32 challengeId,
+        uint256 challengeId,
         address participant
     ) external view returns (Participant memory) {
+        require(challengeId < challenges.length, "Challenge does not exist");
         return participants[challengeId][participant];
     }
 
@@ -489,7 +560,10 @@ contract StravaChallenge {
      * @param challengeId The challenge ID
      * @return bool indicating if finalization is possible
      */
-    function canFinalize(bytes32 challengeId) external view returns (bool) {
+    function canFinalize(uint256 challengeId) external view returns (bool) {
+        if (challengeId >= challenges.length) {
+            return false;
+        }
         Challenge storage challenge = challenges[challengeId];
 
         if (getEffectiveState(challengeId) != ChallengeState.GRACE_PERIOD) {
@@ -505,5 +579,13 @@ contract StravaChallenge {
         }
 
         return true;
+    }
+
+    /**
+     * @notice Get total number of challenges created
+     * @return Total count of challenges
+     */
+    function getChallengeCount() external view returns (uint256) {
+        return challenges.length;
     }
 }
