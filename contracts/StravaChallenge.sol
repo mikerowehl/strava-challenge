@@ -103,7 +103,6 @@ contract StravaChallenge {
     }
 
     constructor(address _oracle) {
-        require(_oracle != address(0), "Invalid oracle address");
         oracle = _oracle;
     }
 
@@ -153,6 +152,44 @@ contract StravaChallenge {
     }
 
     /**
+     * @notice Get the effective state of a challenge (computed lazily)
+     * @dev Computes state based on timestamps and participant count without requiring explicit transitions
+     * @param challengeId The challenge ID
+     * @return ChallengeState The effective current state
+     */
+    function getEffectiveState(bytes32 challengeId) public view returns (ChallengeState) {
+        Challenge storage challenge = challenges[challengeId];
+        ChallengeState storedState = challenge.state;
+
+        // Terminal states are always returned as-is
+        if (storedState == ChallengeState.COMPLETED ||
+            storedState == ChallengeState.FINALIZED ||
+            storedState == ChallengeState.CANCELLED) {
+            return storedState;
+        }
+
+        // Check if challenge should be cancelled (insufficient participants after start time)
+        if (storedState == ChallengeState.PENDING &&
+            block.timestamp >= challenge.startTime &&
+            challenge.participantCount < challenge.minParticipants) {
+            return ChallengeState.CANCELLED;
+        }
+
+        // Check if challenge is in grace period (ended but not finalized)
+        if (block.timestamp >= challenge.endTime) {
+            return ChallengeState.GRACE_PERIOD;
+        }
+
+        // Check if challenge should be active (started with enough participants)
+        if (block.timestamp >= challenge.startTime) {
+            return ChallengeState.ACTIVE;
+        }
+
+        // Still pending
+        return ChallengeState.PENDING;
+    }
+
+    /**
      * @notice Join a challenge by paying stake and registering Strava ID
      * @param challengeId The challenge to join
      * @param stravaUserId Your Strava user ID
@@ -162,9 +199,9 @@ contract StravaChallenge {
         string calldata stravaUserId
     ) external payable {
         Challenge storage challenge = challenges[challengeId];
-        
+
         require(challenge.creator != address(0), "Challenge does not exist");
-        require(challenge.state == ChallengeState.PENDING, "Challenge not accepting participants");
+        require(getEffectiveState(challengeId) == ChallengeState.PENDING, "Challenge not accepting participants");
         require(block.timestamp < challenge.startTime, "Registration closed");
         require(msg.value == challenge.stakeAmount, "Incorrect stake amount");
         require(!participants[challengeId][msg.sender].hasJoined, "Already joined");
@@ -184,37 +221,6 @@ contract StravaChallenge {
         emit ParticipantJoined(challengeId, msg.sender, stravaUserId);
     }
 
-    /**
-     * @notice Activate challenge when start time is reached
-     * @param challengeId The challenge to activate
-     */
-    function activateChallenge(bytes32 challengeId) external {
-        Challenge storage challenge = challenges[challengeId];
-        
-        require(challenge.state == ChallengeState.PENDING, "Challenge not pending");
-        require(block.timestamp >= challenge.startTime, "Start time not reached");
-
-        if (challenge.participantCount < challenge.minParticipants) {
-            // Not enough participants, move to cancelled state
-            challenge.state = ChallengeState.CANCELLED;
-            emit ChallengeCancelled(challengeId);
-        } else {
-            challenge.state = ChallengeState.ACTIVE;
-        }
-    }
-
-    /**
-     * @notice Move challenge to grace period when end time is reached
-     * @param challengeId The challenge to end
-     */
-    function endChallenge(bytes32 challengeId) external {
-        Challenge storage challenge = challenges[challengeId];
-        
-        require(challenge.state == ChallengeState.ACTIVE, "Challenge not active");
-        require(block.timestamp >= challenge.endTime, "End time not reached");
-
-        challenge.state = ChallengeState.GRACE_PERIOD;
-    }
 
     /**
      * @notice Finalize challenge with results (called by oracle)
@@ -229,9 +235,9 @@ contract StravaChallenge {
         bytes32 dataHash
     ) external onlyOracle {
         Challenge storage challenge = challenges[challengeId];
-        
+
         require(
-            challenge.state == ChallengeState.GRACE_PERIOD,
+            getEffectiveState(challengeId) == ChallengeState.GRACE_PERIOD,
             "Challenge not in grace period"
         );
         require(
@@ -274,9 +280,9 @@ contract StravaChallenge {
         bytes calldata oracleSignature
     ) external {
         Challenge storage challenge = challenges[challengeId];
-        
+
         require(
-            challenge.state == ChallengeState.GRACE_PERIOD,
+            getEffectiveState(challengeId) == ChallengeState.GRACE_PERIOD,
             "Challenge not in grace period"
         );
         require(
@@ -353,11 +359,12 @@ contract StravaChallenge {
         bytes[] calldata signatures
     ) external {
         Challenge storage challenge = challenges[challengeId];
-        
+        ChallengeState effectiveState = getEffectiveState(challengeId);
+
         require(
-            challenge.state == ChallengeState.PENDING ||
-            challenge.state == ChallengeState.ACTIVE ||
-            challenge.state == ChallengeState.GRACE_PERIOD,
+            effectiveState == ChallengeState.PENDING ||
+            effectiveState == ChallengeState.ACTIVE ||
+            effectiveState == ChallengeState.GRACE_PERIOD,
             "Challenge cannot be cancelled"
         );
         require(
@@ -393,14 +400,21 @@ contract StravaChallenge {
 
     /**
      * @notice Withdraw stake from cancelled challenge
+     * @dev Lazily updates stored state to CANCELLED on first withdrawal if needed
      * @param challengeId The challenge to withdraw from
      */
     function withdrawFromCancelled(bytes32 challengeId) external {
         Challenge storage challenge = challenges[challengeId];
         Participant storage participant = participants[challengeId][msg.sender];
-        
-        require(challenge.state == ChallengeState.CANCELLED, "Challenge not cancelled");
+
+        require(getEffectiveState(challengeId) == ChallengeState.CANCELLED, "Challenge not cancelled");
         require(participant.stake > 0, "No stake to withdraw");
+
+        // Lazily update stored state to CANCELLED on first withdrawal
+        if (challenge.state != ChallengeState.CANCELLED) {
+            challenge.state = ChallengeState.CANCELLED;
+            emit ChallengeCancelled(challengeId);
+        }
 
         uint256 amount = participant.stake;
         participant.stake = 0;
@@ -416,11 +430,12 @@ contract StravaChallenge {
     function emergencyWithdraw(bytes32 challengeId) external {
         Challenge storage challenge = challenges[challengeId];
         Participant storage participant = participants[challengeId][msg.sender];
-        
+        ChallengeState effectiveState = getEffectiveState(challengeId);
+
         require(
-            challenge.state != ChallengeState.FINALIZED &&
-            challenge.state != ChallengeState.COMPLETED &&
-            challenge.state != ChallengeState.CANCELLED,
+            effectiveState != ChallengeState.FINALIZED &&
+            effectiveState != ChallengeState.COMPLETED &&
+            effectiveState != ChallengeState.CANCELLED,
             "Challenge already resolved"
         );
         require(
@@ -476,19 +491,19 @@ contract StravaChallenge {
      */
     function canFinalize(bytes32 challengeId) external view returns (bool) {
         Challenge storage challenge = challenges[challengeId];
-        
-        if (challenge.state != ChallengeState.GRACE_PERIOD) {
+
+        if (getEffectiveState(challengeId) != ChallengeState.GRACE_PERIOD) {
             return false;
         }
-        
+
         if (block.timestamp < challenge.endTime) {
             return false;
         }
-        
+
         if (block.timestamp >= challenge.endTime + EMERGENCY_PERIOD) {
             return false;
         }
-        
+
         return true;
     }
 }
