@@ -251,50 +251,6 @@ contract StravaChallenge {
 
         emit ParticipantJoined(challengeId, msg.sender, stravaUserId);
     }
-
-
-    /**
-     * @notice Finalize challenge with results (called by oracle)
-     * @dev This is kept as a backup method if oracle wants to finalize directly
-     * @param challengeId The challenge to finalize
-     * @param winner Address of the winner
-     * @param dataHash Hash of all participant confirmations/results
-     */
-    function finalizeChallenge(
-        uint256 challengeId,
-        address winner,
-        bytes32 dataHash
-    ) external onlyOracle {
-        require(challengeId < challenges.length, "Challenge does not exist");
-        Challenge storage challenge = challenges[challengeId];
-
-        require(
-            getEffectiveState(challengeId) == ChallengeState.GRACE_PERIOD,
-            "Challenge not in grace period"
-        );
-        require(
-            block.timestamp >= challenge.endTime,
-            "Challenge not ended"
-        );
-        require(
-            block.timestamp < challenge.endTime + EMERGENCY_PERIOD,
-            "Emergency period active, cannot finalize"
-        );
-        require(participants[challengeId][winner].hasJoined, "Winner not a participant");
-        require(dataHash != bytes32(0), "Invalid data hash");
-
-        challenge.state = ChallengeState.FINALIZED;
-        challenge.winner = winner;
-        challenge.finalDataHash = dataHash;
-
-        emit ChallengeFinalized(
-            challengeId,
-            winner,
-            dataHash,
-            challenge.totalStaked
-        );
-    }
-
     /**
      * @notice Winner claims their prize with oracle-signed results
      * @dev Combines finalization and claiming in one transaction (winner pays gas)
@@ -364,7 +320,8 @@ contract StravaChallenge {
     }
 
     /**
-     * @notice Winner claims their prize (for already-finalized challenges)
+     * @notice Winner claims their prize from an already-finalized challenge
+     * @dev This is a fallback for challenges finalized via claimPrizeWithSignature but not yet claimed
      * @param challengeId The challenge to claim from
      */
     function claimPrize(uint256 challengeId) external {

@@ -436,7 +436,7 @@ describe("StravaChallenge", function() {
       expect(challenge.state).to.equal(0); // PENDING (stored)
     });
 
-    it("Should return stored state for terminal states (FINALIZED)", async function() {
+    it("Should return stored state for terminal states (COMPLETED)", async function() {
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
@@ -448,19 +448,34 @@ describe("StravaChallenge", function() {
       await ethers.provider.send("evm_setNextBlockTimestamp", [endTime + 1]);
       await ethers.provider.send("evm_mine", []);
 
-      // Oracle finalizes the challenge
+      // Get current timestamp for signature
+      const currentBlock = await ethers.provider.getBlock('latest');
+      const timestamp = currentBlock!.timestamp;
+
+      // Create oracle signature for finalization
       const dataHash = ethers.keccak256(ethers.toUtf8Bytes("test-data"));
-      await stravaChallenge.connect(oracle).finalizeChallenge(
+      const messageHash = ethers.keccak256(
+        ethers.solidityPacked(
+          ["string", "uint256", "address", "bytes32", "uint256"],
+          ["FINALIZE_CHALLENGE_", challengeId, participant1.address, dataHash, timestamp]
+        )
+      );
+      const signature = await oracle.signMessage(ethers.getBytes(messageHash));
+
+      // Winner claims with signature (this finalizes and completes in one tx)
+      await stravaChallenge.connect(participant1).claimPrizeWithSignature(
         challengeId,
         participant1.address,
-        dataHash
+        dataHash,
+        timestamp,
+        signature
       );
 
       const effectiveState = await stravaChallenge.getEffectiveState(challengeId);
-      expect(effectiveState).to.equal(3); // FINALIZED
+      expect(effectiveState).to.equal(5); // COMPLETED
 
       const challenge = await stravaChallenge.challenges(challengeId);
-      expect(challenge.state).to.equal(3); // FINALIZED (stored)
+      expect(challenge.state).to.equal(5); // COMPLETED (stored)
     });
   });
 
