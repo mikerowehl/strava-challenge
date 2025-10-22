@@ -12,6 +12,10 @@ export const participantsRouter = express.Router();
  * sign a message confirming their final mileage. This allows the oracle
  * to finalize early if all participants have confirmed.
  *
+ * The signature is stored in the database to provide a verifiable audit trail.
+ * Anyone can later verify that each participant cryptographically confirmed
+ * their data, reducing trust requirements in the oracle.
+ *
  * Body:
  * {
  *   "challengeId": 0,
@@ -96,10 +100,14 @@ participantsRouter.post('/confirm', async (req, res) => {
       });
     }
 
-    // Update participant confirmation status
+    // Update participant confirmation status with signature and timestamp
     await query(
-      'UPDATE participants SET confirmed = TRUE WHERE challenge_id = $1 AND wallet_address = $2',
-      [challengeId, walletAddress]
+      `UPDATE participants
+       SET confirmed = TRUE,
+           confirmation_signature = $3,
+           confirmed_at = CURRENT_TIMESTAMP
+       WHERE challenge_id = $1 AND wallet_address = $2`,
+      [challengeId, walletAddress, signature]
     );
 
     console.log(`Participant confirmed: challenge=${challengeId}, wallet=${walletAddress}`);
@@ -132,6 +140,89 @@ participantsRouter.post('/confirm', async (req, res) => {
 });
 
 /**
+ * POST /participants/verify-signature
+ * Verify a stored confirmation signature
+ *
+ * Allows anyone to verify that a participant's confirmation signature is valid.
+ * This provides transparency and reduces trust in the oracle.
+ *
+ * Body:
+ * {
+ *   "challengeId": 0,
+ *   "walletAddress": "0x..."
+ * }
+ *
+ * Returns the stored signature and verification result.
+ */
+participantsRouter.post('/verify-signature', async (req, res) => {
+  try {
+    const { challengeId, walletAddress } = req.body;
+
+    if (challengeId === undefined || challengeId === null) {
+      return res.status(400).json({ error: 'challengeId is required' });
+    }
+
+    if (!walletAddress || !ethers.isAddress(walletAddress)) {
+      return res.status(400).json({ error: 'Invalid wallet address' });
+    }
+
+    // Get participant confirmation data
+    const result = await query(
+      `SELECT confirmation_signature, confirmed_at, confirmed
+       FROM participants
+       WHERE challenge_id = $1 AND wallet_address = $2`,
+      [challengeId, walletAddress]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Participant not found' });
+    }
+
+    const participant = result.rows[0];
+
+    if (!participant.confirmed || !participant.confirmation_signature) {
+      return res.json({
+        confirmed: false,
+        message: 'Participant has not confirmed yet'
+      });
+    }
+
+    // Verify the signature
+    const message = `CONFIRM_CHALLENGE_${challengeId}`;
+    let recoveredAddress;
+    let isValid = false;
+
+    try {
+      const messageHash = ethers.hashMessage(message);
+      recoveredAddress = ethers.recoverAddress(messageHash, participant.confirmation_signature);
+      isValid = recoveredAddress.toLowerCase() === walletAddress.toLowerCase();
+    } catch (error) {
+      return res.json({
+        confirmed: true,
+        signature: participant.confirmation_signature,
+        confirmedAt: participant.confirmed_at,
+        isValid: false,
+        error: 'Invalid signature format'
+      });
+    }
+
+    res.json({
+      confirmed: true,
+      signature: participant.confirmation_signature,
+      confirmedAt: participant.confirmed_at,
+      message: message,
+      recoveredAddress: recoveredAddress,
+      expectedAddress: walletAddress,
+      isValid: isValid
+    });
+
+  } catch (error) {
+    console.error('Signature verification error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /participants/:challengeId
  * Get all participants for a challenge with their confirmation status
  */
@@ -145,6 +236,7 @@ participantsRouter.get('/:challengeId', async (req, res) => {
 
     const result = await query(
       `SELECT p.wallet_address, p.strava_user_id, p.confirmed, p.joined_at,
+              p.confirmation_signature, p.confirmed_at,
               m.total_miles, m.snapshot_at
        FROM participants p
        LEFT JOIN LATERAL (
@@ -164,6 +256,8 @@ participantsRouter.get('/:challengeId', async (req, res) => {
       stravaUserId: row.strava_user_id,
       confirmed: row.confirmed,
       joinedAt: row.joined_at,
+      confirmationSignature: row.confirmation_signature,
+      confirmedAt: row.confirmed_at,
       currentMiles: row.total_miles ? parseFloat(row.total_miles) : 0,
       lastUpdate: row.snapshot_at
     }));

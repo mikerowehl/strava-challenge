@@ -37,6 +37,8 @@ export async function runMigrations() {
         has_joined BOOLEAN DEFAULT FALSE,
         stake_paid BOOLEAN DEFAULT FALSE,
         confirmed BOOLEAN DEFAULT FALSE,
+        confirmation_signature TEXT,
+        confirmed_at TIMESTAMP,
         PRIMARY KEY (challenge_id, wallet_address)
       )
     `);
