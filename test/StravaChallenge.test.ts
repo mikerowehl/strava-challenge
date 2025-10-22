@@ -74,9 +74,10 @@ describe("StravaChallenge", function() {
       expect(challenge.state).to.equal(0); // PENDING
       expect(challenge.participantCount).to.equal(0);
 
-      // Verify whitelist
+      // Verify whitelist (creator is automatically included)
       const allowedList = await stravaChallenge.getAllowedParticipants(challengeId);
-      expect(allowedList).to.have.lengthOf(2);
+      expect(allowedList).to.have.lengthOf(3);
+      expect(allowedList).to.include(creator.address); // Creator auto-included
       expect(allowedList).to.include(participant1.address);
       expect(allowedList).to.include(participant2.address);
     });
@@ -157,15 +158,15 @@ describe("StravaChallenge", function() {
       ).to.be.revertedWith("Stake must be positive");
     });
 
-    it("Should revert if allowed participants list has less than 2 addresses", async function() {
+    it("Should revert if allowed participants list has less than 1 address", async function() {
       await expect(
         stravaChallenge.connect(creator).createChallenge(
           startTime,
           endTime,
           stakeAmount,
-          [participant1.address]
+          [] // Empty array - creator is automatically included, but need at least 1 other
         )
-      ).to.be.revertedWith("Need at least 2 participants");
+      ).to.be.revertedWith("Need at least 1 other participant");
     });
 
     it("Should revert if whitelist contains zero address", async function() {
@@ -367,6 +368,10 @@ describe("StravaChallenge", function() {
     });
 
     it("Should return PENDING state before start time", async function() {
+      // Creator is auto-included, so all 3 need to join
+      await stravaChallenge.connect(creator).joinChallenge(challengeId, "strava_creator", {
+        value: stakeAmount
+      });
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
@@ -379,6 +384,10 @@ describe("StravaChallenge", function() {
     });
 
     it("Should return ACTIVE state after start time with enough participants", async function() {
+      // Creator is auto-included, so all 3 need to join
+      await stravaChallenge.connect(creator).joinChallenge(challengeId, "strava_creator", {
+        value: stakeAmount
+      });
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
@@ -417,6 +426,10 @@ describe("StravaChallenge", function() {
     });
 
     it("Should return GRACE_PERIOD state after end time", async function() {
+      // Creator is auto-included, so all 3 need to join
+      await stravaChallenge.connect(creator).joinChallenge(challengeId, "strava_creator", {
+        value: stakeAmount
+      });
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
@@ -437,6 +450,10 @@ describe("StravaChallenge", function() {
     });
 
     it("Should return stored state for terminal states (COMPLETED)", async function() {
+      // Creator is auto-included, so all 3 need to join
+      await stravaChallenge.connect(creator).joinChallenge(challengeId, "strava_creator", {
+        value: stakeAmount
+      });
       await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
         value: stakeAmount
       });
