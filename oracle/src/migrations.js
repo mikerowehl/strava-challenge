@@ -46,7 +46,7 @@ export async function runMigrations() {
     await query(`
       CREATE TABLE IF NOT EXISTS strava_tokens (
         wallet_address VARCHAR(42) PRIMARY KEY,
-        strava_user_id VARCHAR(50) UNIQUE NOT NULL,
+        strava_user_id VARCHAR(50) NOT NULL,
         access_token TEXT NOT NULL,
         refresh_token TEXT NOT NULL,
         expires_at BIGINT NOT NULL,

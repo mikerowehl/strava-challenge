@@ -108,10 +108,11 @@ contract StravaChallenge {
 
     /**
      * @notice Create a new challenge with a whitelist of allowed participants
+     * @dev The challenge creator is automatically added to the whitelist
      * @param startTime Unix timestamp when challenge starts
      * @param endTime Unix timestamp when challenge ends
      * @param stakeAmount Amount each participant must stake (in wei)
-     * @param allowedAddresses Array of addresses allowed to join this challenge
+     * @param allowedAddresses Array of OTHER addresses allowed to join (creator auto-included)
      * @return challengeId The ID of the newly created challenge
      */
     function createChallenge(
@@ -123,7 +124,7 @@ contract StravaChallenge {
         require(startTime > block.timestamp, "Start time must be in future");
         require(endTime > startTime, "End time must be after start");
         require(stakeAmount > 0, "Stake must be positive");
-        require(allowedAddresses.length >= 2, "Need at least 2 participants");
+        require(allowedAddresses.length >= 1, "Need at least 1 other participant");
 
         challengeId = challenges.length;
 
@@ -140,13 +141,17 @@ contract StravaChallenge {
             participantCount: 0
         }));
 
+        // Automatically add creator to whitelist
+        allowedParticipantsList[challengeId].push(msg.sender);
+
         // Store allowed participants and check for duplicates
         for (uint256 i = 0; i < allowedAddresses.length; i++) {
             require(allowedAddresses[i] != address(0), "Invalid address in whitelist");
+            require(allowedAddresses[i] != msg.sender, "Creator is automatically included");
 
-            // Check for duplicates by searching array
-            for (uint256 j = 0; j < i; j++) {
-                require(allowedAddresses[j] != allowedAddresses[i], "Duplicate address in whitelist");
+            // Check for duplicates by searching array (including creator)
+            for (uint256 j = 0; j < allowedParticipantsList[challengeId].length; j++) {
+                require(allowedParticipantsList[challengeId][j] != allowedAddresses[i], "Duplicate address in whitelist");
             }
 
             allowedParticipantsList[challengeId].push(allowedAddresses[i]);
@@ -158,7 +163,7 @@ contract StravaChallenge {
             startTime,
             endTime,
             stakeAmount,
-            allowedAddresses.length
+            allowedParticipantsList[challengeId].length
         );
     }
 

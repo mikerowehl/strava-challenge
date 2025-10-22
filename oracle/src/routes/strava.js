@@ -197,7 +197,8 @@ stravaRouter.get('/status/:walletAddress', async (req, res) => {
     }
 
     const token = result.rows[0];
-    const athleteData = JSON.parse(token.athlete_data);
+    // athlete_data is already an object (JSONB type), no need to parse
+    const athleteData = token.athlete_data;
 
     res.json({
       connected: true,
