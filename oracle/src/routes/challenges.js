@@ -1,5 +1,6 @@
 import express from 'express';
 import { query } from '../db.js';
+import { syncChallengeParticipants } from '../sync-service.js';
 
 export const challengesRouter = express.Router();
 
@@ -90,11 +91,25 @@ challengesRouter.get('/:id/leaderboard', async (req, res) => {
 /**
  * POST /challenges/:id/sync
  * Manually trigger a sync for a challenge
- * (To be implemented in Checkpoint 2.3)
  */
 challengesRouter.post('/:id/sync', async (req, res) => {
-  res.status(501).json({
-    message: 'Manual sync not yet implemented',
-    checkpoint: '2.3'
-  });
+  try {
+    const challengeId = parseInt(req.params.id);
+
+    if (isNaN(challengeId)) {
+      return res.status(400).json({ error: 'Invalid challenge ID' });
+    }
+
+    // Run sync
+    const result = await syncChallengeParticipants(challengeId);
+
+    res.json({
+      success: true,
+      ...result
+    });
+
+  } catch (error) {
+    console.error('Manual sync error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });

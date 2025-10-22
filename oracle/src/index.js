@@ -4,6 +4,9 @@ import { setupDatabase } from './db.js';
 import { oracleRouter } from './routes/oracle.js';
 import { stravaRouter } from './routes/strava.js';
 import { challengesRouter } from './routes/challenges.js';
+import { participantsRouter } from './routes/participants.js';
+import { devRouter } from './routes/dev.js';
+import { startCronJobs } from './cron.js';
 
 // Load environment variables
 dotenv.config();
@@ -30,6 +33,8 @@ app.get('/health', (req, res) => {
 app.use('/oracle', oracleRouter);
 app.use('/auth/strava', stravaRouter);
 app.use('/challenges', challengesRouter);
+app.use('/participants', participantsRouter);
+app.use('/dev', devRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -51,6 +56,9 @@ async function start() {
     // Initialize database connection
     await setupDatabase();
     console.log('Database connected');
+
+    // Start cron jobs
+    startCronJobs();
 
     // Start listening
     app.listen(PORT, () => {
