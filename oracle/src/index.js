@@ -7,6 +7,7 @@ import { challengesRouter } from './routes/challenges.js';
 import { participantsRouter } from './routes/participants.js';
 import { devRouter } from './routes/dev.js';
 import { startCronJobs } from './cron.js';
+import { startEventListener, stopEventListener } from './event-listener.js';
 
 // Load environment variables
 dotenv.config();
@@ -71,6 +72,9 @@ async function start() {
     await setupDatabase();
     console.log('Database connected');
 
+    // Start blockchain event listener
+    await startEventListener();
+
     // Start cron jobs
     startCronJobs();
 
@@ -85,5 +89,18 @@ async function start() {
     process.exit(1);
   }
 }
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\nShutting down gracefully...');
+  await stopEventListener();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\nShutting down gracefully...');
+  await stopEventListener();
+  process.exit(0);
+});
 
 start();

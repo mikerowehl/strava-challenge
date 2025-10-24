@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { ethers } from 'ethers';
 import { getStateLabel } from '../utils/contract';
-import { getStravaStatus, getStravaAuthUrl, getFinalization, confirmMileage } from '../utils/api';
+import { getStravaStatus, getStravaAuthUrl, getFinalization, confirmMileage, setMockMileage, isMockMode as checkMockMode } from '../utils/api';
 import Leaderboard from './Leaderboard';
 
 function ChallengeView({ challengeId }) {
@@ -16,6 +16,8 @@ function ChallengeView({ challengeId }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [txStatus, setTxStatus] = useState(null);
+  const [mockMiles, setMockMiles] = useState('0');
+  const [isMockMode, setIsMockMode] = useState(false);
 
   useEffect(() => {
     loadChallenge();
@@ -26,6 +28,16 @@ function ChallengeView({ challengeId }) {
       checkStravaStatus();
     }
   }, [account]);
+
+  useEffect(() => {
+    // Check if oracle is in mock mode
+    const checkMode = async () => {
+      const mockMode = await checkMockMode();
+      console.log('[ChallengeView] Mock mode detected:', mockMode);
+      setIsMockMode(mockMode);
+    };
+    checkMode();
+  }, []);
 
   const loadChallenge = async () => {
     try {
@@ -83,7 +95,7 @@ function ChallengeView({ challengeId }) {
     try {
       const status = await getStravaStatus(account);
       setStravaConnected(status.connected);
-      if (status.connected && !stravaUserId) {
+      if (status.connected) {
         setStravaUserId(status.stravaUserId);
       }
     } catch (err) {
@@ -196,6 +208,30 @@ function ChallengeView({ challengeId }) {
     }
   };
 
+  const handleSetMockMileage = async () => {
+    try {
+      setTxStatus('Setting mock mileage...');
+      setError(null);
+
+      const miles = parseFloat(mockMiles);
+      if (isNaN(miles) || miles < 0) {
+        setError('Please enter a valid number of miles');
+        setTxStatus(null);
+        return;
+      }
+
+      await setMockMileage(challengeId, account, miles);
+
+      setTxStatus(`Mock mileage set to ${miles} miles!`);
+      setTimeout(() => setTxStatus(null), 3000);
+
+    } catch (err) {
+      console.error('Error setting mock mileage:', err);
+      setError('Failed to set mileage: ' + err.message);
+      setTxStatus(null);
+    }
+  };
+
   const formatEth = (wei) => {
     return ethers.formatEther(wei);
   };
@@ -258,6 +294,19 @@ function ChallengeView({ challengeId }) {
 
   return (
     <div className="challenge-view">
+      {isMockMode && (
+        <div className="mock-banner" style={{
+          background: '#fff3cd',
+          border: '2px solid #ffc107',
+          padding: '10px',
+          marginBottom: '20px',
+          borderRadius: '5px',
+          textAlign: 'center'
+        }}>
+          <strong>MOCK MODE:</strong> Using test data instead of real Strava API
+        </div>
+      )}
+
       <h2>Challenge #{challenge.id}</h2>
 
       <div className="challenge-info">
@@ -341,6 +390,30 @@ function ChallengeView({ challengeId }) {
         <div className="participant-info">
           <p className="success">You are participating in this challenge!</p>
           <p>Your Strava ID: {stravaUserId}</p>
+        </div>
+      )}
+
+      {/* Mock mileage control for testing */}
+      {console.log('[ChallengeView] Render check - isMockMode:', isMockMode, 'hasJoined:', hasJoined)}
+      {isMockMode && hasJoined && (
+        <div className="actions">
+          <h3>Set Mock Mileage (Testing)</h3>
+          <p>Enter mileage to simulate your running activities:</p>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={mockMiles}
+              onChange={(e) => setMockMiles(e.target.value)}
+              placeholder="Miles"
+              style={{ width: '120px' }}
+            />
+            <button onClick={handleSetMockMileage} className="btn btn-secondary">
+              Set Mileage
+            </button>
+          </div>
+          <small>This will appear in the leaderboard once the challenge is active.</small>
         </div>
       )}
 

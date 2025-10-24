@@ -1,9 +1,11 @@
 import express from 'express';
 import axios from 'axios';
 import { query } from '../db.js';
+import { getMockStravaId } from '../mock-strava.js';
 
 export const stravaRouter = express.Router();
 
+const USE_MOCK = process.env.MOCK_STRAVA === 'true';
 const STRAVA_AUTHORIZE_URL = 'https://www.strava.com/oauth/authorize';
 const STRAVA_TOKEN_URL = 'https://www.strava.com/api/v3/oauth/token';
 
@@ -15,7 +17,7 @@ const STRAVA_TOKEN_URL = 'https://www.strava.com/api/v3/oauth/token';
  * - walletAddress: User's Ethereum address (required)
  * - challengeId: Challenge they're joining (optional, for context)
  */
-stravaRouter.get('/', (req, res) => {
+stravaRouter.get('/', async (req, res) => {
   try {
     const { walletAddress, challengeId } = req.query;
 
@@ -26,6 +28,62 @@ stravaRouter.get('/', (req, res) => {
     // Validate wallet address format (basic check)
     if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       return res.status(400).json({ error: 'Invalid wallet address format' });
+    }
+
+    // Mock mode: auto-connect without OAuth
+    if (USE_MOCK) {
+      const mockStravaId = getMockStravaId(walletAddress);
+
+      // Store mock token
+      await query(
+        `INSERT INTO strava_tokens
+         (wallet_address, strava_user_id, access_token, refresh_token, expires_at, athlete_data)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (wallet_address)
+         DO UPDATE SET
+           strava_user_id = EXCLUDED.strava_user_id,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          walletAddress,
+          mockStravaId,
+          'mock_access_token',
+          'mock_refresh_token',
+          9999999999, // Far future expiry
+          JSON.stringify({
+            id: parseInt(mockStravaId),
+            firstname: 'Mock',
+            lastname: 'User',
+            username: `mock_${walletAddress.substring(2, 8)}`
+          })
+        ]
+      );
+
+      console.log(`[MOCK] Auto-connected Strava: wallet=${walletAddress}, mockId=${mockStravaId}`);
+
+      // Return success page
+      return res.send(`
+        <html>
+          <head>
+            <style>
+              body { font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+              h1 { color: #fc4c02; }
+              .info { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border: 2px solid #ffc107; }
+              code { background: #333; color: #0f0; padding: 2px 6px; border-radius: 3px; }
+            </style>
+          </head>
+          <body>
+            <h1>Mock Strava Connected</h1>
+            <div class="info">
+              <strong>MOCK MODE:</strong> Using test data instead of real Strava API
+            </div>
+            <p><strong>Wallet Address:</strong> <code>${walletAddress}</code></p>
+            <p><strong>Mock Strava ID:</strong> <code>${mockStravaId}</code></p>
+            ${challengeId ? `<p><strong>Challenge ID:</strong> ${challengeId}</p>` : ''}
+            <p>You can now close this window and return to the application.</p>
+            <p><em>Use the "Set Mileage" feature in the challenge view to set your test mileage.</em></p>
+          </body>
+        </html>
+      `);
     }
 
     const clientId = process.env.STRAVA_CLIENT_ID;

@@ -1,5 +1,13 @@
 import axios from 'axios';
 import { query } from './db.js';
+import * as mockStrava from './mock-strava.js';
+
+// Use mock Strava client if MOCK_STRAVA is enabled
+const USE_MOCK = process.env.MOCK_STRAVA === 'true';
+
+if (USE_MOCK) {
+  console.log('[STRAVA] Running in MOCK mode - using test data instead of real Strava API');
+}
 
 const STRAVA_API_BASE = 'https://www.strava.com/api/v3';
 const STRAVA_TOKEN_URL = 'https://www.strava.com/api/v3/oauth/token';
@@ -72,6 +80,10 @@ async function getValidAccessToken(walletAddress) {
  * @returns {Array} Array of activities
  */
 export async function fetchActivities(walletAddress, afterTimestamp, beforeTimestamp) {
+  if (USE_MOCK) {
+    return mockStrava.fetchActivities(walletAddress, afterTimestamp, beforeTimestamp);
+  }
+
   const accessToken = await getValidAccessToken(walletAddress);
 
   const activities = [];
@@ -125,6 +137,10 @@ export async function fetchActivities(walletAddress, afterTimestamp, beforeTimes
  * @returns {number} Total miles
  */
 export function calculateTotalMiles(activities) {
+  if (USE_MOCK) {
+    return mockStrava.calculateTotalMiles(activities);
+  }
+
   const runningActivities = activities.filter(a =>
     a.type === 'Run' || a.type === 'VirtualRun'
   );
@@ -144,6 +160,10 @@ export function calculateTotalMiles(activities) {
  * @returns {Object} { miles, activities, rawActivities }
  */
 export async function fetchParticipantMileage(walletAddress, challengeStartTime, challengeEndTime) {
+  if (USE_MOCK) {
+    return mockStrava.fetchParticipantMileage(walletAddress, challengeStartTime, challengeEndTime);
+  }
+
   try {
     const activities = await fetchActivities(walletAddress, challengeStartTime, challengeEndTime);
     const miles = calculateTotalMiles(activities);
@@ -164,6 +184,10 @@ export async function fetchParticipantMileage(walletAddress, challengeStartTime,
  * Get athlete stats (for testing/verification)
  */
 export async function getAthleteStats(walletAddress) {
+  if (USE_MOCK) {
+    return mockStrava.getAthleteStats(walletAddress);
+  }
+
   const accessToken = await getValidAccessToken(walletAddress);
 
   try {

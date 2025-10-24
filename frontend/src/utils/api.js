@@ -2,6 +2,19 @@
 
 const ORACLE_URL = process.env.REACT_APP_ORACLE_URL || 'http://localhost:3000';
 
+// Check if oracle is in mock mode
+export async function isMockMode() {
+  try {
+    const response = await fetch(`${ORACLE_URL}/dev/mock-status`);
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.mockMode === true;
+  } catch (error) {
+    console.error('Error checking mock mode:', error);
+    return false;
+  }
+}
+
 // Get oracle Ethereum address
 export async function getOracleAddress() {
   const response = await fetch(`${ORACLE_URL}/oracle/address`);
@@ -71,5 +84,27 @@ export async function getChallengeFromOracle(challengeId) {
 // List all challenges from oracle
 export async function getAllChallenges() {
   const response = await fetch(`${ORACLE_URL}/challenges`);
+  return await response.json();
+}
+
+// Set mock mileage (MOCK_STRAVA mode only)
+export async function setMockMileage(challengeId, walletAddress, miles) {
+  const response = await fetch(`${ORACLE_URL}/dev/set-mileage`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      challengeId,
+      walletAddress,
+      miles
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to set mileage');
+  }
+
   return await response.json();
 }
