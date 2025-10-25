@@ -10,6 +10,29 @@ const __dirname = path.dirname(__filename);
 let contract = null;
 let provider = null;
 
+// Handle uncaught errors from ethers.js event polling
+// This is a workaround for a known issue with local Hardhat nodes:
+// https://github.com/ethers-io/ethers.js/discussions/4116
+// Fixing it this way instead of the fixed time block mining version
+// so that we have more control over the blocks when we want to move
+// the time around during testing.
+const originalRejectionHandler = process.listeners('unhandledRejection')[0];
+process.removeAllListeners('unhandledRejection');
+process.on('unhandledRejection', (error, promise) => {
+  if (error instanceof TypeError &&
+    error.message === 'results is not iterable' &&
+    error.stack?.includes('FilterIdEventSubscriber')) {
+    // Silently ignore this specific error - it's a harmless polling issue with local nodes
+    return;
+  }
+  // Pass other errors to original handler or log them
+  if (originalRejectionHandler) {
+    originalRejectionHandler(error, promise);
+  } else {
+    console.error('Unhandled rejection:', error);
+  }
+});
+
 /**
  * Initialize the event listener
  * Sets up listeners for contract events and syncs existing data
@@ -22,8 +45,13 @@ export async function startEventListener() {
     const contractArtifactPath = path.join(__dirname, '../../artifacts/contracts/StravaChallenge.sol/StravaChallenge.json');
     const contractArtifact = JSON.parse(fs.readFileSync(contractArtifactPath, 'utf8'));
 
-    // Connect to blockchain
-    provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+    // Connect to blockchain with polling configuration for better local node compatibility
+    provider = new ethers.JsonRpcProvider(process.env.RPC_URL, undefined, {
+      polling: true,
+      pollingInterval: 1000,  // Poll every 1 second
+      staticNetwork: true      // Avoid network detection calls
+    });
+
     contract = new ethers.Contract(
       process.env.CONTRACT_ADDRESS,
       contractArtifact.abi,
@@ -31,6 +59,16 @@ export async function startEventListener() {
     );
 
     console.log(`Connected to contract at ${process.env.CONTRACT_ADDRESS}`);
+
+    // Add error handler for provider polling errors
+    provider.on('error', (error) => {
+      // Silently ignore polling errors that don't affect functionality
+      if (error.message && error.message.includes('results is not iterable')) {
+        // This is a known issue with local Hardhat nodes, can be safely ignored
+        return;
+      }
+      console.error('Provider error:', error);
+    });
 
     // Sync existing data on startup
     await syncExistingData();
