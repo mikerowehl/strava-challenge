@@ -202,6 +202,18 @@ function setupEventListeners() {
 }
 
 /**
+ * Get the current blockchain timestamp
+ * Use this instead of Date.now() to ensure consistency with on-chain time
+ */
+export async function getBlockchainTime() {
+  if (!provider) {
+    throw new Error('Provider not initialized. Call startEventListener() first.');
+  }
+  const block = await provider.getBlock('latest');
+  return block.timestamp;
+}
+
+/**
  * Stop the event listener (for graceful shutdown)
  */
 export async function stopEventListener() {

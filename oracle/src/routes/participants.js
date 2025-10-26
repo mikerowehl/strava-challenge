@@ -1,6 +1,7 @@
 import express from 'express';
 import { ethers } from 'ethers';
 import { query } from '../db.js';
+import { getBlockchainTime } from '../event-listener.js';
 
 export const participantsRouter = express.Router();
 
@@ -51,7 +52,7 @@ participantsRouter.post('/confirm', async (req, res) => {
     }
 
     const challenge = challengeResult.rows[0];
-    const now = Math.floor(Date.now() / 1000);
+    const now = await getBlockchainTime();
 
     // Check if challenge has ended
     if (now < challenge.end_time) {

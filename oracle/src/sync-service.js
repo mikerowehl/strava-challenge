@@ -1,5 +1,6 @@
 import { query } from './db.js';
 import { fetchParticipantMileage } from './strava-client.js';
+import { getBlockchainTime } from './event-listener.js';
 
 /**
  * Sync mileage for all participants in a challenge
@@ -18,7 +19,7 @@ export async function syncChallengeParticipants(challengeId) {
     }
 
     const challenge = challengeResult.rows[0];
-    const now = Math.floor(Date.now() / 1000);
+    const now = await getBlockchainTime();
 
     // Get all participants who have connected Strava
     const participantsResult = await query(
@@ -97,7 +98,7 @@ export async function syncChallengeParticipants(challengeId) {
  */
 export async function syncActiveChallenges() {
   try {
-    const now = Math.floor(Date.now() / 1000);
+    const now = await getBlockchainTime();
 
     // Get all challenges that are currently active
     // (started but not yet ended)

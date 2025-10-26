@@ -19,6 +19,7 @@ function ChallengeView({ challengeId }) {
   const [txStatus, setTxStatus] = useState(null);
   const [mockMiles, setMockMiles] = useState('0');
   const [isMockMode, setIsMockMode] = useState(false);
+  const [blockchainTime, setBlockchainTime] = useState(null);
 
   useEffect(() => {
     loadChallenge();
@@ -59,6 +60,10 @@ function ChallengeView({ challengeId }) {
       // Debug: Check what the provider is seeing
       const provider = contractToUse.runner?.provider || contractToUse.provider;
       await debugBlockchainState(provider, contractToUse, challengeId);
+
+      // Get current blockchain time for UI calculations
+      const currentBlock = await provider.getBlock('latest');
+      setBlockchainTime(currentBlock.timestamp);
 
       setChallenge({
         id: data.id.toString(),
@@ -258,8 +263,8 @@ function ChallengeView({ challengeId }) {
   };
 
   const getTimeRemaining = () => {
-    if (!challenge) return '';
-    const now = Math.floor(Date.now() / 1000);
+    if (!challenge || !blockchainTime) return '';
+    const now = blockchainTime;
 
     if (now < challenge.startTime) {
       const diff = challenge.startTime - now;
@@ -277,9 +282,10 @@ function ChallengeView({ challengeId }) {
   };
 
   const canJoin = () => {
-    if (!challenge || !isConnected || !isAllowed || hasJoined) return false;
-    const now = Math.floor(Date.now() / 1000);
-    return challenge.state === 0 && now < challenge.startTime && stravaConnected;
+    if (!challenge || !isConnected || !isAllowed || hasJoined || !blockchainTime) return false;
+    // Check if challenge is PENDING and blockchain time is before start
+    // Using blockchain time instead of system time for consistency with smart contract
+    return challenge.state === 0 && blockchainTime < challenge.startTime && stravaConnected;
   };
 
   const canClaim = () => {

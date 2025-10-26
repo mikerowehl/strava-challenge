@@ -2,6 +2,7 @@ import express from 'express';
 import { ethers } from 'ethers';
 import { signFinalization, getOracleAddress } from '../wallet.js';
 import { query } from '../db.js';
+import { getBlockchainTime } from '../event-listener.js';
 
 export const oracleRouter = express.Router();
 
@@ -51,7 +52,7 @@ oracleRouter.get('/challenge/:id/finalization', async (req, res) => {
     }
 
     const challenge = challengeResult.rows[0];
-    const now = Math.floor(Date.now() / 1000);
+    const now = await getBlockchainTime();
 
     // Check if challenge has ended
     if (now < challenge.end_time) {
@@ -136,7 +137,7 @@ oracleRouter.get('/challenge/:id/finalization', async (req, res) => {
     const dataHash = ethers.keccak256(ethers.toUtf8Bytes(resultsString));
 
     // Generate signature
-    const timestamp = Math.floor(Date.now() / 1000);
+    const timestamp = await getBlockchainTime();
     const signature = await signFinalization(
       challengeId,
       winner.wallet_address,
