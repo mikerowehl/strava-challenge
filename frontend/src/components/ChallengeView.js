@@ -480,7 +480,6 @@ function ChallengeView({ challengeId }) {
               Set Mileage
             </button>
           </div>
-          <small>This will appear in the leaderboard once the challenge is active.</small>
           </div>
         </>
       )}

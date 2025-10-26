@@ -45,7 +45,7 @@ function App() {
     <WalletProvider>
       <div className="App">
         <header>
-          <h1>Strava Challenge dApp</h1>
+          <h1>Strava Challenge</h1>
           <nav>
             <button onClick={() => navigate('home')} className="nav-link">
               Home
@@ -140,16 +140,6 @@ function HomePage({ navigate }) {
             </button>
           </form>
         </div>
-      </section>
-
-      <section className="info">
-        <h3>Key Features</h3>
-        <ul>
-          <li>Trustless prize distribution via smart contracts</li>
-          <li>Automatic activity tracking from Strava</li>
-          <li>7-day grace period after challenges end</li>
-          <li>Emergency withdrawal if oracle fails</li>
-        </ul>
       </section>
     </div>
   );
