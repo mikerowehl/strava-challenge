@@ -22,6 +22,7 @@ function ChallengeView({ challengeId }) {
   const [blockchainTime, setBlockchainTime] = useState(null);
   const [hasConfirmed, setHasConfirmed] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
+  const [userStake, setUserStake] = useState(null);
 
   useEffect(() => {
     loadChallenge();
@@ -89,6 +90,7 @@ function ChallengeView({ challengeId }) {
         if (allowed) {
           const participantData = await contractToUse.getParticipant(challengeId, account);
           setHasJoined(participantData.hasJoined);
+          setUserStake(participantData.stake);
           if (participantData.hasJoined) {
             setStravaUserId(participantData.stravaUserId);
 
@@ -271,6 +273,48 @@ function ChallengeView({ challengeId }) {
     }
   };
 
+  const handleEmergencyWithdraw = async () => {
+    try {
+      setTxStatus('Withdrawing stake...');
+      setError(null);
+
+      const tx = await contract.emergencyWithdraw(challengeId);
+
+      setTxStatus(`Transaction submitted: ${tx.hash.substring(0, 10)}...`);
+      await tx.wait();
+      setTxStatus('Stake withdrawn successfully!');
+
+      // Reload challenge data
+      setTimeout(loadChallenge, 2000);
+
+    } catch (err) {
+      console.error('Error withdrawing stake:', err);
+      setError('Failed to withdraw: ' + err.message);
+      setTxStatus(null);
+    }
+  };
+
+  const handleWithdrawFromCancelled = async () => {
+    try {
+      setTxStatus('Withdrawing stake...');
+      setError(null);
+
+      const tx = await contract.withdrawFromCancelled(challengeId);
+
+      setTxStatus(`Transaction submitted: ${tx.hash.substring(0, 10)}...`);
+      await tx.wait();
+      setTxStatus('Stake withdrawn successfully!');
+
+      // Reload challenge data
+      setTimeout(loadChallenge, 2000);
+
+    } catch (err) {
+      console.error('Error withdrawing stake:', err);
+      setError('Failed to withdraw: ' + err.message);
+      setTxStatus(null);
+    }
+  };
+
   const formatEth = (wei) => {
     return ethers.formatEther(wei);
   };
@@ -327,6 +371,23 @@ function ChallengeView({ challengeId }) {
 
   const isWinner = () => {
     return challenge?.winner?.toLowerCase() === account?.toLowerCase();
+  };
+
+  const canEmergencyWithdraw = () => {
+    if (!challenge || !isConnected || !account || !blockchainTime || !userStake) return false;
+    const EMERGENCY_PERIOD = 14 * 24 * 60 * 60; // 14 days in seconds
+    return challenge.state !== 4 && // Not COMPLETED
+           challenge.state !== 3 && // Not CANCELLED
+           blockchainTime >= challenge.endTime + EMERGENCY_PERIOD &&
+           hasJoined &&
+           userStake > 0; // User still has stake to withdraw
+  };
+
+  const canWithdrawFromCancelled = () => {
+    if (!challenge || !isConnected || !account || !userStake) return false;
+    return challenge.state === 3 && // CANCELLED
+           hasJoined &&
+           userStake > 0; // User still has stake to withdraw
   };
 
   if (loading) {
@@ -403,8 +464,30 @@ function ChallengeView({ challengeId }) {
       {txStatus && <div className="success">{txStatus}</div>}
 
       {/* Leaderboard for active/ended challenges */}
-      {(challenge.state === 1 || challenge.state === 2) && (
+      {(challenge.state === 1 || challenge.state === 2 || canEmergencyWithdraw()) && (
         <Leaderboard challengeId={challengeId} currentAccount={account} />
+      )}
+
+      {/* Cancelled challenge withdrawal */}
+      {canWithdrawFromCancelled() && (
+        <div className="actions">
+          <h3>Cancel</h3>
+          <p>This challenge was cancelled because not enough participants joined by the start time. You can withdraw your stake.</p>
+          <button onClick={handleWithdrawFromCancelled} className="btn btn-secondary">
+            Withdraw Stake
+          </button>
+        </div>
+      )}
+
+      {/* Emergency withdrawal */}
+      {canEmergencyWithdraw() && (
+        <div className="actions">
+          <h3>Cancel</h3>
+          <p>The winner has not claimed the prize within the time window. You can cancel the challenge and withdraw your stake.</p>
+          <button onClick={handleEmergencyWithdraw} className="btn btn-secondary">
+            Withdraw Stake
+          </button>
+        </div>
       )}
 
       {/* Confirm mileage during grace period */}
