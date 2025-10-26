@@ -22,10 +22,10 @@ const challenge = await contract.challenges(challengeId);
 const effectiveState = await contract.getEffectiveState(challengeId);
 
 console.log(`Challenge ID: ${challengeId}`);
-console.log(`State: ${effectiveState} (0=PENDING, 1=ACTIVE, 2=GRACE_PERIOD, 3=FINALIZED, 4=CANCELLED)`);
+console.log(`State: ${effectiveState} (0=PENDING, 1=ACTIVE, 2=GRACE_PERIOD, 3=CANCELLED, 4=COMPLETED)`);
 console.log(`Total Staked: ${ethers.formatEther(challenge.totalStaked)} ETH`);
 console.log(`Winner: ${challenge.winner}`);
-console.log(`Finalized: ${effectiveState === 3n ? 'Yes' : 'No'}`);
+console.log(`Completed: ${effectiveState === 4n ? 'Yes' : 'No'}`);
 
 // If a transaction hash is provided, check it
 if (txHash) {

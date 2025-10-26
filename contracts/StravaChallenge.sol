@@ -12,7 +12,6 @@ contract StravaChallenge {
         PENDING,      // Accepting participants
         ACTIVE,       // Challenge running
         GRACE_PERIOD, // Ended, waiting for confirmations
-        FINALIZED,    // Results submitted, winner can claim
         CANCELLED,    // Cancelled, refunds available
         COMPLETED     // Winner claimed prize
     }
@@ -197,7 +196,6 @@ contract StravaChallenge {
 
         // Terminal states are always returned as-is
         if (storedState == ChallengeState.COMPLETED ||
-            storedState == ChallengeState.FINALIZED ||
             storedState == ChallengeState.CANCELLED) {
             return storedState;
         }
@@ -256,6 +254,7 @@ contract StravaChallenge {
 
         emit ParticipantJoined(challengeId, msg.sender, stravaUserId);
     }
+
     /**
      * @notice Winner claims their prize with oracle-signed results
      * @dev Combines finalization and claiming in one transaction (winner pays gas)
@@ -325,77 +324,6 @@ contract StravaChallenge {
     }
 
     /**
-     * @notice Winner claims their prize from an already-finalized challenge
-     * @dev This is a fallback for challenges finalized via claimPrizeWithSignature but not yet claimed
-     * @param challengeId The challenge to claim from
-     */
-    function claimPrize(uint256 challengeId) external {
-        require(challengeId < challenges.length, "Challenge does not exist");
-        Challenge storage challenge = challenges[challengeId];
-        
-        require(challenge.state == ChallengeState.FINALIZED, "Challenge not finalized");
-        require(msg.sender == challenge.winner, "Only winner can claim");
-
-        uint256 prize = challenge.totalStaked;
-        challenge.state = ChallengeState.COMPLETED;
-        challenge.totalStaked = 0;
-
-        payable(msg.sender).transfer(prize);
-
-        emit PrizeClaimed(challengeId, msg.sender, prize);
-    }
-
-    /**
-     * @notice Cancel challenge with unanimous participant consent
-     * @param challengeId The challenge to cancel
-     * @param signatures Array of signatures from ALL participants
-     */
-    function cancelChallengeByConsent(
-        uint256 challengeId,
-        bytes[] calldata signatures
-    ) external {
-        require(challengeId < challenges.length, "Challenge does not exist");
-        Challenge storage challenge = challenges[challengeId];
-        ChallengeState effectiveState = getEffectiveState(challengeId);
-
-        require(
-            effectiveState == ChallengeState.PENDING ||
-            effectiveState == ChallengeState.ACTIVE ||
-            effectiveState == ChallengeState.GRACE_PERIOD,
-            "Challenge cannot be cancelled"
-        );
-        require(
-            signatures.length == challenge.participantCount,
-            "Need all participant signatures"
-        );
-
-        // Verify all participants signed
-        bytes32 messageHash = keccak256(
-            abi.encodePacked("CANCEL_CHALLENGE_", challengeId)
-        ).toEthSignedMessageHash();
-
-        address[] memory signers = new address[](signatures.length);
-        
-        for (uint256 i = 0; i < signatures.length; i++) {
-            address signer = messageHash.recover(signatures[i]);
-            require(
-                participants[challengeId][signer].hasJoined,
-                "Invalid signature"
-            );
-            
-            // Check for duplicate signatures
-            for (uint256 j = 0; j < i; j++) {
-                require(signers[j] != signer, "Duplicate signature");
-            }
-            
-            signers[i] = signer;
-        }
-
-        challenge.state = ChallengeState.CANCELLED;
-        emit ChallengeCancelled(challengeId);
-    }
-
-    /**
      * @notice Withdraw stake from cancelled challenge
      * @dev Lazily updates stored state to CANCELLED on first withdrawal if needed
      * @param challengeId The challenge to withdraw from
@@ -432,7 +360,6 @@ contract StravaChallenge {
         ChallengeState effectiveState = getEffectiveState(challengeId);
 
         require(
-            effectiveState != ChallengeState.FINALIZED &&
             effectiveState != ChallengeState.COMPLETED &&
             effectiveState != ChallengeState.CANCELLED,
             "Challenge already resolved"

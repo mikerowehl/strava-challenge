@@ -63,4 +63,4 @@ if (blockTime >= endTime) {
 }
 
 console.log(`\nActual effective state returned: ${effectiveState}`);
-console.log(`State names: 0=PENDING, 1=ACTIVE, 2=GRACE_PERIOD, 3=FINALIZED, 4=CANCELLED`);
+console.log(`State names: 0=PENDING, 1=ACTIVE, 2=GRACE_PERIOD, 3=CANCELLED, 4=COMPLETED`);

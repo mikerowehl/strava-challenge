@@ -12,15 +12,13 @@ export const ChallengeState = {
   0: 'PENDING',
   1: 'ACTIVE',
   2: 'GRACE_PERIOD',
-  3: 'FINALIZED',
-  4: 'CANCELLED',
-  5: 'COMPLETED',
+  3: 'CANCELLED',
+  4: 'COMPLETED',
   PENDING: 0,
   ACTIVE: 1,
   GRACE_PERIOD: 2,
-  FINALIZED: 3,
-  CANCELLED: 4,
-  COMPLETED: 5
+  CANCELLED: 3,
+  COMPLETED: 4
 };
 
 export const getStateLabel = (state) => {

@@ -338,9 +338,8 @@ footer {
 .state-0 { background-color: #ffd; color: #660; } /* PENDING */
 .state-1 { background-color: #dfd; color: #060; } /* ACTIVE */
 .state-2 { background-color: #ffd; color: #660; } /* GRACE_PERIOD */
-.state-3 { background-color: #ddf; color: #006; } /* FINALIZED */
-.state-4 { background-color: #fdd; color: #600; } /* CANCELLED */
-.state-5 { background-color: #ddf; color: #006; } /* COMPLETED */
+.state-3 { background-color: #fdd; color: #600; } /* CANCELLED */
+.state-4 { background-color: #ddf; color: #006; } /* COMPLETED */
 
 .participant-info {
   background-color: #efe;

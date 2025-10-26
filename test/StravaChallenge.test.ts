@@ -418,7 +418,7 @@ describe("StravaChallenge", function() {
       await ethers.provider.send("evm_mine", []);
 
       const effectiveState = await stravaChallenge.getEffectiveState(challengeId);
-      expect(effectiveState).to.equal(4); // CANCELLED
+      expect(effectiveState).to.equal(3); // CANCELLED
 
       // Stored state should still be PENDING until withdrawal
       const challenge = await stravaChallenge.challenges(challengeId);
@@ -489,10 +489,10 @@ describe("StravaChallenge", function() {
       );
 
       const effectiveState = await stravaChallenge.getEffectiveState(challengeId);
-      expect(effectiveState).to.equal(5); // COMPLETED
+      expect(effectiveState).to.equal(4); // COMPLETED
 
       const challenge = await stravaChallenge.challenges(challengeId);
-      expect(challenge.state).to.equal(5); // COMPLETED (stored)
+      expect(challenge.state).to.equal(4); // COMPLETED (stored)
     });
   });
 
@@ -553,7 +553,7 @@ describe("StravaChallenge", function() {
 
       // Stored state should now be CANCELLED
       const challenge = await stravaChallenge.challenges(challengeId);
-      expect(challenge.state).to.equal(4); // CANCELLED
+      expect(challenge.state).to.equal(3); // CANCELLED
     });
 
     it("Should update total staked when participant withdraws", async function() {
