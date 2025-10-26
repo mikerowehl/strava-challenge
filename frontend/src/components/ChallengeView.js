@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { getStateLabel } from '../utils/contract';
 import { getStravaStatus, getStravaAuthUrl, getFinalization, confirmMileage, setMockMileage, isMockMode as checkMockMode } from '../utils/api';
 import Leaderboard from './Leaderboard';
+import { debugBlockchainState } from '../utils/debug';
 
 function ChallengeView({ challengeId }) {
   const { contract, account, isConnected, getReadOnlyContract } = useWallet();
@@ -54,6 +55,10 @@ function ChallengeView({ challengeId }) {
       const data = await contractToUse.challenges(challengeId);
       const state = await contractToUse.getEffectiveState(challengeId);
       const participantAddresses = await contractToUse.getParticipants(challengeId);
+
+      // Debug: Check what the provider is seeing
+      const provider = contractToUse.runner?.provider || contractToUse.provider;
+      await debugBlockchainState(provider, contractToUse, challengeId);
 
       setChallenge({
         id: data.id.toString(),
@@ -237,7 +242,15 @@ function ChallengeView({ challengeId }) {
   };
 
   const formatDate = (timestamp) => {
-    return new Date(timestamp * 1000).toLocaleString();
+    return new Date(timestamp * 1000).toLocaleString(undefined, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
   };
 
   const formatAddress = (address) => {

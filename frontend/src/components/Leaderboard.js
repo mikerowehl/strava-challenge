@@ -35,7 +35,15 @@ function Leaderboard({ challengeId }) {
 
   const formatDate = (date) => {
     if (!date) return '';
-    return new Date(date).toLocaleString();
+    return new Date(date).toLocaleString(undefined, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short'
+    });
   };
 
   if (loading) {
@@ -56,7 +64,7 @@ function Leaderboard({ challengeId }) {
       <div className="leaderboard-header">
         <h3>Leaderboard</h3>
         {lastUpdate && (
-          <small>Last updated: {lastUpdate.toLocaleTimeString()}</small>
+          <small>Last updated: {lastUpdate.toLocaleTimeString(undefined, { timeZoneName: 'short' })}</small>
         )}
       </div>
 
