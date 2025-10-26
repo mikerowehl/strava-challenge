@@ -351,6 +351,7 @@ contract StravaChallenge {
 
     /**
      * @notice Emergency withdrawal if oracle fails to finalize
+     * @dev Lazily updates stored state to CANCELLED on first withdrawal if needed
      * @param challengeId The challenge to withdraw from
      */
     function emergencyWithdraw(uint256 challengeId) external {
@@ -360,15 +361,21 @@ contract StravaChallenge {
         ChallengeState effectiveState = getEffectiveState(challengeId);
 
         require(
-            effectiveState != ChallengeState.COMPLETED &&
-            effectiveState != ChallengeState.CANCELLED,
-            "Challenge already resolved"
+            effectiveState != ChallengeState.COMPLETED,
+            "Challenge already completed"
         );
         require(
+            effectiveState == ChallengeState.CANCELLED ||
             block.timestamp >= challenge.endTime + EMERGENCY_PERIOD,
             "Emergency period not reached"
         );
         require(participant.stake > 0, "No stake to withdraw");
+
+        // Lazily update stored state to CANCELLED on first emergency withdrawal
+        if (challenge.state != ChallengeState.CANCELLED) {
+            challenge.state = ChallengeState.CANCELLED;
+            emit ChallengeCancelled(challengeId);
+        }
 
         uint256 amount = participant.stake;
         participant.stake = 0;

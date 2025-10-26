@@ -613,4 +613,246 @@ describe("StravaChallenge", function() {
       ).to.be.revertedWith("No stake to withdraw");
     });
   });
+
+  describe("Emergency Withdrawal", function() {
+    beforeEach(async function() {
+      challengeId = await stravaChallenge.connect(creator).createChallenge.staticCall(
+        startTime,
+        endTime,
+        stakeAmount,
+        allowedAddresses
+      );
+      await stravaChallenge.connect(creator).createChallenge(
+        startTime,
+        endTime,
+        stakeAmount,
+        allowedAddresses
+      );
+
+      // Have all participants join
+      await stravaChallenge.connect(creator).joinChallenge(challengeId, "strava_creator", {
+        value: stakeAmount
+      });
+      await stravaChallenge.connect(participant1).joinChallenge(challengeId, "strava123", {
+        value: stakeAmount
+      });
+      await stravaChallenge.connect(participant2).joinChallenge(challengeId, "strava456", {
+        value: stakeAmount
+      });
+    });
+
+    it("Should allow emergency withdrawal after emergency period", async function() {
+      // Move time past end + emergency period
+      const emergencyTime = endTime + 14 * 24 * 3600; // EMERGENCY_PERIOD = 14 days
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      const balanceBefore = await ethers.provider.getBalance(participant1.address);
+
+      const tx = await stravaChallenge.connect(participant1).emergencyWithdraw(challengeId);
+      const receipt = await tx.wait();
+      const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+
+      const balanceAfter = await ethers.provider.getBalance(participant1.address);
+
+      expect(balanceAfter).to.equal(balanceBefore + stakeAmount - gasUsed);
+
+      // Check participant's stake is now zero
+      const participant = await stravaChallenge.getParticipant(challengeId, participant1.address);
+      expect(participant.stake).to.equal(0);
+    });
+
+    it("Should emit ChallengeCancelled event on first emergency withdrawal", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      // First withdrawal should emit the event
+      await expect(
+        stravaChallenge.connect(participant1).emergencyWithdraw(challengeId)
+      ).to.emit(stravaChallenge, "ChallengeCancelled")
+        .withArgs(challengeId);
+
+      // Stored state should now be CANCELLED
+      const challenge = await stravaChallenge.challenges(challengeId);
+      expect(challenge.state).to.equal(3); // CANCELLED
+    });
+
+    it("Should not emit ChallengeCancelled on subsequent emergency withdrawals", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      // First withdrawal
+      await stravaChallenge.connect(participant1).emergencyWithdraw(challengeId);
+
+      // Second withdrawal should NOT emit ChallengeCancelled (state already CANCELLED)
+      const tx = await stravaChallenge.connect(participant2).emergencyWithdraw(challengeId);
+      const receipt = await tx.wait();
+
+      const cancelledEvents = receipt!.logs.filter((log: any) => {
+        try {
+          const parsed = stravaChallenge.interface.parseLog(log);
+          return parsed?.name === "ChallengeCancelled";
+        } catch {
+          return false;
+        }
+      });
+
+      expect(cancelledEvents).to.have.lengthOf(0);
+    });
+
+    it("Should allow subsequent emergency withdrawals after state is CANCELLED", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      // First withdrawal
+      await stravaChallenge.connect(participant1).emergencyWithdraw(challengeId);
+
+      // Verify state is now CANCELLED
+      const challenge = await stravaChallenge.challenges(challengeId);
+      expect(challenge.state).to.equal(3); // CANCELLED
+
+      // Second and third withdrawals should work
+      const balanceBefore2 = await ethers.provider.getBalance(participant2.address);
+      const tx2 = await stravaChallenge.connect(participant2).emergencyWithdraw(challengeId);
+      const receipt2 = await tx2.wait();
+      const gasUsed2 = receipt2!.gasUsed * receipt2!.gasPrice;
+      const balanceAfter2 = await ethers.provider.getBalance(participant2.address);
+      expect(balanceAfter2).to.equal(balanceBefore2 + stakeAmount - gasUsed2);
+
+      const balanceBefore3 = await ethers.provider.getBalance(creator.address);
+      const tx3 = await stravaChallenge.connect(creator).emergencyWithdraw(challengeId);
+      const receipt3 = await tx3.wait();
+      const gasUsed3 = receipt3!.gasUsed * receipt3!.gasPrice;
+      const balanceAfter3 = await ethers.provider.getBalance(creator.address);
+      expect(balanceAfter3).to.equal(balanceBefore3 + stakeAmount - gasUsed3);
+    });
+
+    it("Should allow withdrawal via withdrawFromCancelled after emergency withdrawal sets state", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      // First participant uses emergency withdrawal
+      await stravaChallenge.connect(participant1).emergencyWithdraw(challengeId);
+
+      // Second participant should be able to use withdrawFromCancelled
+      const balanceBefore = await ethers.provider.getBalance(participant2.address);
+      const tx = await stravaChallenge.connect(participant2).withdrawFromCancelled(challengeId);
+      const receipt = await tx.wait();
+      const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+      const balanceAfter = await ethers.provider.getBalance(participant2.address);
+
+      expect(balanceAfter).to.equal(balanceBefore + stakeAmount - gasUsed);
+    });
+
+    it("Should update total staked when participants withdraw", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      const initialStaked = (await stravaChallenge.challenges(challengeId)).totalStaked;
+      expect(initialStaked).to.equal(stakeAmount * 3n); // 3 participants
+
+      await stravaChallenge.connect(participant1).emergencyWithdraw(challengeId);
+      let challenge = await stravaChallenge.challenges(challengeId);
+      expect(challenge.totalStaked).to.equal(stakeAmount * 2n);
+
+      await stravaChallenge.connect(participant2).emergencyWithdraw(challengeId);
+      challenge = await stravaChallenge.challenges(challengeId);
+      expect(challenge.totalStaked).to.equal(stakeAmount);
+
+      await stravaChallenge.connect(creator).emergencyWithdraw(challengeId);
+      challenge = await stravaChallenge.challenges(challengeId);
+      expect(challenge.totalStaked).to.equal(0);
+    });
+
+    it("Should revert if emergency period not reached", async function() {
+      // Move time to just before emergency period
+      const beforeEmergency = endTime + 14 * 24 * 3600 - 100;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [beforeEmergency]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        stravaChallenge.connect(participant1).emergencyWithdraw(challengeId)
+      ).to.be.revertedWith("Emergency period not reached");
+    });
+
+    it("Should revert if challenge is completed", async function() {
+      // Move time past end time (into grace period)
+      await ethers.provider.send("evm_setNextBlockTimestamp", [endTime + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      // Get current timestamp for signature
+      const currentBlock = await ethers.provider.getBlock('latest');
+      const timestamp = currentBlock!.timestamp;
+
+      // Create oracle signature for finalization
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes("test-data"));
+      const messageHash = ethers.keccak256(
+        ethers.solidityPacked(
+          ["string", "uint256", "address", "bytes32", "uint256"],
+          ["FINALIZE_CHALLENGE_", challengeId, participant1.address, dataHash, timestamp]
+        )
+      );
+      const signature = await oracle.signMessage(ethers.getBytes(messageHash));
+
+      // Complete the challenge
+      await stravaChallenge.connect(participant1).claimPrizeWithSignature(
+        challengeId,
+        participant1.address,
+        dataHash,
+        timestamp,
+        signature
+      );
+
+      // Now try emergency withdrawal - should fail
+      await expect(
+        stravaChallenge.connect(participant2).emergencyWithdraw(challengeId)
+      ).to.be.revertedWith("Challenge already completed");
+    });
+
+    it("Should revert if participant has no stake", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      // Withdraw once
+      await stravaChallenge.connect(participant1).emergencyWithdraw(challengeId);
+
+      // Try to withdraw again
+      await expect(
+        stravaChallenge.connect(participant1).emergencyWithdraw(challengeId)
+      ).to.be.revertedWith("No stake to withdraw");
+    });
+
+    it("Should revert if user was not a participant", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      // participant3 was never a participant
+      await expect(
+        stravaChallenge.connect(participant3).emergencyWithdraw(challengeId)
+      ).to.be.revertedWith("No stake to withdraw");
+    });
+
+    it("Should emit EmergencyWithdrawal event for each withdrawal", async function() {
+      const emergencyTime = endTime + 14 * 24 * 3600;
+      await ethers.provider.send("evm_setNextBlockTimestamp", [emergencyTime]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        stravaChallenge.connect(participant1).emergencyWithdraw(challengeId)
+      ).to.emit(stravaChallenge, "EmergencyWithdrawal")
+        .withArgs(challengeId, participant1.address, stakeAmount);
+
+      await expect(
+        stravaChallenge.connect(participant2).emergencyWithdraw(challengeId)
+      ).to.emit(stravaChallenge, "EmergencyWithdrawal")
+        .withArgs(challengeId, participant2.address, stakeAmount);
+    });
+  });
 });
