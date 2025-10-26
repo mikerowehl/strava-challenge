@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getLeaderboard } from '../utils/api';
 
-function Leaderboard({ challengeId }) {
+function Leaderboard({ challengeId, currentAccount }) {
   const [leaderboard, setLeaderboard] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -78,15 +78,20 @@ function Leaderboard({ challengeId }) {
               <th>Address</th>
               <th>Miles</th>
               <th>Last Update</th>
+              <th>Confirmed</th>
             </tr>
           </thead>
           <tbody>
             {leaderboard.map((entry) => (
               <tr key={entry.address} className={entry.rank === 1 ? 'winner' : ''}>
                 <td>{entry.rank}</td>
-                <td>{formatAddress(entry.address)}</td>
+                <td>
+                  {formatAddress(entry.address)}
+                  {currentAccount && entry.address.toLowerCase() === currentAccount.toLowerCase() && ' (You)'}
+                </td>
                 <td>{entry.miles.toFixed(2)}</td>
                 <td>{formatDate(entry.lastUpdate)}</td>
+                <td>{entry.confirmed && entry.confirmedAt ? formatDate(entry.confirmedAt) : '-'}</td>
               </tr>
             ))}
           </tbody>

@@ -59,10 +59,12 @@ challengesRouter.get('/:id/leaderboard', async (req, res) => {
       return res.status(400).json({ error: 'Invalid challenge ID' });
     }
 
-    // Get latest mileage snapshot for each participant
+    // Get latest mileage snapshot for each participant with confirmation status
     const result = await query(
-      `SELECT m.wallet_address, m.strava_user_id, m.total_miles, m.snapshot_at
+      `SELECT m.wallet_address, m.strava_user_id, m.total_miles, m.snapshot_at,
+              p.confirmed, p.confirmed_at
        FROM mileage_snapshots m
+       LEFT JOIN participants p ON m.wallet_address = p.wallet_address AND m.challenge_id = p.challenge_id
        WHERE m.challenge_id = $1
        AND m.id IN (
          SELECT MAX(id) FROM mileage_snapshots
@@ -80,7 +82,9 @@ challengesRouter.get('/:id/leaderboard', async (req, res) => {
         address: row.wallet_address,
         stravaUserId: row.strava_user_id,
         miles: parseFloat(row.total_miles),
-        lastUpdate: row.snapshot_at
+        lastUpdate: row.snapshot_at,
+        confirmed: row.confirmed || false,
+        confirmedAt: row.confirmed_at
       }))
     });
   } catch (error) {

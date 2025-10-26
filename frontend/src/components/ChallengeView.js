@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { ethers } from 'ethers';
 import { getStateLabel } from '../utils/contract';
-import { getStravaStatus, getStravaAuthUrl, getFinalization, confirmMileage, setMockMileage, isMockMode as checkMockMode } from '../utils/api';
+import { getStravaStatus, getStravaAuthUrl, getFinalization, confirmMileage, setMockMileage, isMockMode as checkMockMode, getParticipants, getLeaderboard } from '../utils/api';
 import Leaderboard from './Leaderboard';
 import { debugBlockchainState } from '../utils/debug';
 
@@ -20,6 +20,8 @@ function ChallengeView({ challengeId }) {
   const [mockMiles, setMockMiles] = useState('0');
   const [isMockMode, setIsMockMode] = useState(false);
   const [blockchainTime, setBlockchainTime] = useState(null);
+  const [hasConfirmed, setHasConfirmed] = useState(false);
+  const [isLeader, setIsLeader] = useState(false);
 
   useEffect(() => {
     loadChallenge();
@@ -89,6 +91,32 @@ function ChallengeView({ challengeId }) {
           setHasJoined(participantData.hasJoined);
           if (participantData.hasJoined) {
             setStravaUserId(participantData.stravaUserId);
+
+            // Check confirmation status and leader status from oracle
+            try {
+              const participantsData = await getParticipants(challengeId);
+              const currentUserData = participantsData.participants.find(
+                p => p.walletAddress.toLowerCase() === account.toLowerCase()
+              );
+              if (currentUserData) {
+                setHasConfirmed(currentUserData.confirmed);
+              }
+
+              // Check if user is the leader (rank 1 on leaderboard)
+              try {
+                const leaderboardData = await getLeaderboard(challengeId);
+                if (leaderboardData.leaderboard && leaderboardData.leaderboard.length > 0) {
+                  const leader = leaderboardData.leaderboard[0];
+                  setIsLeader(leader.address.toLowerCase() === account.toLowerCase());
+                }
+              } catch (err) {
+                console.error('Error fetching leaderboard for leader check:', err);
+                // Don't throw - just log the error
+              }
+            } catch (err) {
+              console.error('Error fetching confirmation status:', err);
+              // Don't throw - just log the error
+            }
           }
         }
       }
@@ -209,6 +237,7 @@ function ChallengeView({ challengeId }) {
       await confirmMileage(challengeId, account, signature);
 
       setTxStatus('Mileage confirmed!');
+      setHasConfirmed(true);
       setTimeout(() => setTxStatus(null), 3000);
 
     } catch (err) {
@@ -292,7 +321,8 @@ function ChallengeView({ challengeId }) {
     if (!challenge || !isConnected || !account) return false;
     return challenge.state === 2 && // GRACE_PERIOD
            challenge.winner === ethers.ZeroAddress &&
-           hasJoined;
+           hasJoined &&
+           isLeader; // Only the leader can claim
   };
 
   const isWinner = () => {
@@ -313,16 +343,11 @@ function ChallengeView({ challengeId }) {
 
   return (
     <div className="challenge-view">
-      {isMockMode && (
-        <div className="mock-banner" style={{
-          background: '#fff3cd',
-          border: '2px solid #ffc107',
-          padding: '10px',
-          marginBottom: '20px',
-          borderRadius: '5px',
-          textAlign: 'center'
-        }}>
-          <strong>MOCK MODE:</strong> Using test data instead of real Strava API
+      {hasJoined && (
+        <div className="participant-info" style={{ marginBottom: '20px' }}>
+          <p className="success">
+            {canClaim() || isWinner() ? 'You won this challenge!' : 'You are participating in this challenge!'}
+          </p>
         </div>
       )}
 
@@ -377,6 +402,22 @@ function ChallengeView({ challengeId }) {
       {error && <div className="error">{error}</div>}
       {txStatus && <div className="success">{txStatus}</div>}
 
+      {/* Leaderboard for active/ended challenges */}
+      {(challenge.state === 1 || challenge.state === 2) && (
+        <Leaderboard challengeId={challengeId} currentAccount={account} />
+      )}
+
+      {/* Confirm mileage during grace period */}
+      {challenge.state === 2 && hasJoined && !hasConfirmed && (
+        <div className="actions">
+          <h3>Confirm</h3>
+          <p>Use this button to confirm that all your activities for the challenge are uploaded to Strava and the total on the Leaderboard above is correct.</p>
+          <button onClick={handleConfirmMileage} className="btn btn-secondary">
+            Confirm My Mileage
+          </button>
+        </div>
+      )}
+
       {/* Action buttons based on state */}
       {isConnected && isAllowed && !hasJoined && challenge.state === 0 && (
         <div className="actions">
@@ -405,19 +446,26 @@ function ChallengeView({ challengeId }) {
         </div>
       )}
 
-      {hasJoined && (
-        <div className="participant-info">
-          <p className="success">You are participating in this challenge!</p>
-          <p>Your Strava ID: {stravaUserId}</p>
-        </div>
-      )}
-
       {/* Mock mileage control for testing */}
       {console.log('[ChallengeView] Render check - isMockMode:', isMockMode, 'hasJoined:', hasJoined)}
       {isMockMode && hasJoined && (
-        <div className="actions">
-          <h3>Set Mock Mileage (Testing)</h3>
-          <p>Enter mileage to simulate your running activities:</p>
+        <>
+          <div className="mock-banner" style={{
+            background: '#fff3cd',
+            border: '2px solid #ffc107',
+            padding: '10px',
+            marginBottom: '20px',
+            borderRadius: '5px',
+            textAlign: 'center'
+          }}>
+            <strong>MOCK MODE:</strong> Using test data instead of real Strava API
+          </div>
+          <div style={{ marginBottom: '15px' }}>
+            <p>Your Strava ID: {stravaUserId}</p>
+          </div>
+          <div className="actions">
+            <h3>Set Mock Mileage (Testing)</h3>
+            <p>Enter mileage to simulate your running activities:</p>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <input
               type="number"
@@ -433,23 +481,8 @@ function ChallengeView({ challengeId }) {
             </button>
           </div>
           <small>This will appear in the leaderboard once the challenge is active.</small>
-        </div>
-      )}
-
-      {/* Leaderboard for active/ended challenges */}
-      {(challenge.state === 1 || challenge.state === 2) && (
-        <Leaderboard challengeId={challengeId} />
-      )}
-
-      {/* Confirm mileage during grace period */}
-      {challenge.state === 2 && hasJoined && (
-        <div className="actions">
-          <h3>Grace Period</h3>
-          <p>Make sure all your activities are uploaded to Strava, then confirm your mileage.</p>
-          <button onClick={handleConfirmMileage} className="btn btn-secondary">
-            Confirm My Mileage
-          </button>
-        </div>
+          </div>
+        </>
       )}
 
       {/* Claim prize */}

@@ -108,3 +108,13 @@ export async function setMockMileage(challengeId, walletAddress, miles) {
 
   return await response.json();
 }
+
+// Get all participants with confirmation status
+export async function getParticipants(challengeId) {
+  const response = await fetch(`${ORACLE_URL}/participants/${challengeId}`);
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to get participants');
+  }
+  return await response.json();
+}
