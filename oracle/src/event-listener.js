@@ -198,7 +198,17 @@ function setupEventListeners() {
     }
   });
 
-  console.log('Event listeners registered for: ChallengeCreated, ParticipantJoined, ChallengeFinalized');
+  // Listen for ChallengeCancelled events
+  contract.on('ChallengeCancelled', async (challengeId, event) => {
+    console.log(`Event: ChallengeCancelled - Challenge #${challengeId}`);
+    try {
+      await syncChallenge(Number(challengeId));
+    } catch (error) {
+      console.error(`Error handling ChallengeCancelled event:`, error);
+    }
+  });
+
+  console.log('Event listeners registered for: ChallengeCreated, ParticipantJoined, ChallengeFinalized, ChallengeCancelled');
 }
 
 /**

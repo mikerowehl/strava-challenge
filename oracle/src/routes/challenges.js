@@ -61,8 +61,10 @@ challengesRouter.get('/:id/leaderboard', async (req, res) => {
 
     // Get latest mileage snapshot for each participant with confirmation status
     const result = await query(
-      `SELECT m.wallet_address, m.strava_user_id, m.total_miles, m.snapshot_at,
-              p.confirmed, p.confirmed_at
+      `SELECT m.wallet_address, m.strava_user_id, m.total_miles,
+              (m.snapshot_at AT TIME ZONE 'UTC') AS snapshot_at,
+              p.confirmed,
+              (p.confirmed_at AT TIME ZONE 'UTC') AS confirmed_at
        FROM mileage_snapshots m
        LEFT JOIN participants p ON m.wallet_address = p.wallet_address AND m.challenge_id = p.challenge_id
        WHERE m.challenge_id = $1
@@ -82,9 +84,9 @@ challengesRouter.get('/:id/leaderboard', async (req, res) => {
         address: row.wallet_address,
         stravaUserId: row.strava_user_id,
         miles: parseFloat(row.total_miles),
-        lastUpdate: row.snapshot_at,
+        lastUpdate: row.snapshot_at ? new Date(row.snapshot_at).toISOString() : null,
         confirmed: row.confirmed || false,
-        confirmedAt: row.confirmed_at
+        confirmedAt: row.confirmed_at ? new Date(row.confirmed_at).toISOString() : null
       }))
     });
   } catch (error) {
