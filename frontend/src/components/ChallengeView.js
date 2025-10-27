@@ -24,6 +24,7 @@ function ChallengeView({ challengeId }) {
   const [hasConfirmed, setHasConfirmed] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
   const [userStake, setUserStake] = useState(null);
+  const [allParticipantsConfirmed, setAllParticipantsConfirmed] = useState(false);
 
   useEffect(() => {
     loadChallenge();
@@ -116,6 +117,11 @@ function ChallengeView({ challengeId }) {
               if (currentUserData) {
                 setHasConfirmed(currentUserData.confirmed);
               }
+
+              // Check if all participants have confirmed
+              const allConfirmed = participantsData.participants.length > 0 &&
+                participantsData.participants.every(p => p.confirmed);
+              setAllParticipantsConfirmed(allConfirmed);
 
               // Check if user is the leader (rank 1 on leaderboard)
               try {
@@ -381,11 +387,17 @@ function ChallengeView({ challengeId }) {
   };
 
   const canClaim = () => {
-    if (!challenge || !isConnected || !account) return false;
+    if (!challenge || !isConnected || !account || !blockchainTime) return false;
+
+    const GRACE_PERIOD = 7 * 24 * 60 * 60; // 7 days in seconds
+    const gracePeriodEnded = blockchainTime >= challenge.endTime + GRACE_PERIOD;
+    const canFinalize = allParticipantsConfirmed || gracePeriodEnded;
+
     return challenge.state === 2 && // GRACE_PERIOD
            challenge.winner === ethers.ZeroAddress &&
            hasJoined &&
-           isLeader; // Only the leader can claim
+           isLeader && // Only the leader can claim
+           canFinalize; // All confirmed or grace period ended
   };
 
   const isWinner = () => {
