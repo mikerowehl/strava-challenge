@@ -5,6 +5,7 @@ import { getStateLabel } from '../utils/contract';
 import { getStravaStatus, getStravaAuthUrl, getFinalization, confirmMileage, setMockMileage, isMockMode as checkMockMode, getParticipants, getLeaderboard } from '../utils/api';
 import Leaderboard from './Leaderboard';
 import { debugBlockchainState } from '../utils/debug';
+import { parseBlockchainError, getOperationError } from '../utils/blockchainErrors';
 
 function ChallengeView({ challengeId }) {
   const { contract, account, isConnected, getReadOnlyContract } = useWallet();
@@ -53,6 +54,18 @@ function ChallengeView({ challengeId }) {
       if (!contractToUse) {
         setError('Contract not initialized. Please set CONTRACT_ADDRESS in .env');
         return;
+      }
+
+      // First, check if the challenge exists by comparing ID to total count
+      try {
+        const challengeCount = await contractToUse.getChallengeCount();
+        if (challengeId >= challengeCount) {
+          setError(`Challenge #${challengeId} does not exist. Only ${challengeCount} challenge(s) have been created.`);
+          return;
+        }
+      } catch (err) {
+        console.error('Error checking challenge count:', err);
+        // Continue anyway - the specific calls below will catch the error too
       }
 
       // Get challenge data
@@ -125,7 +138,8 @@ function ChallengeView({ challengeId }) {
 
     } catch (err) {
       console.error('Error loading challenge:', err);
-      setError('Failed to load challenge: ' + err.message);
+      const userFriendlyError = getOperationError('loading challenge', err);
+      setError(userFriendlyError);
     } finally {
       setLoading(false);
     }
@@ -189,7 +203,8 @@ function ChallengeView({ challengeId }) {
 
     } catch (err) {
       console.error('Error joining challenge:', err);
-      setError('Failed to join: ' + err.message);
+      const userFriendlyError = getOperationError('joining challenge', err);
+      setError(userFriendlyError);
       setTxStatus(null);
     }
   };
@@ -221,7 +236,8 @@ function ChallengeView({ challengeId }) {
 
     } catch (err) {
       console.error('Error claiming prize:', err);
-      setError('Failed to claim: ' + err.message);
+      const userFriendlyError = getOperationError('claiming prize', err);
+      setError(userFriendlyError);
       setTxStatus(null);
     }
   };
@@ -244,7 +260,8 @@ function ChallengeView({ challengeId }) {
 
     } catch (err) {
       console.error('Error confirming mileage:', err);
-      setError('Failed to confirm: ' + err.message);
+      const userFriendlyError = parseBlockchainError(err, 'confirming mileage');
+      setError(userFriendlyError);
       setTxStatus(null);
     }
   };
@@ -289,7 +306,8 @@ function ChallengeView({ challengeId }) {
 
     } catch (err) {
       console.error('Error withdrawing stake:', err);
-      setError('Failed to withdraw: ' + err.message);
+      const userFriendlyError = getOperationError('withdrawing', err);
+      setError(userFriendlyError);
       setTxStatus(null);
     }
   };
@@ -310,7 +328,8 @@ function ChallengeView({ challengeId }) {
 
     } catch (err) {
       console.error('Error withdrawing stake:', err);
-      setError('Failed to withdraw: ' + err.message);
+      const userFriendlyError = getOperationError('withdrawing', err);
+      setError(userFriendlyError);
       setTxStatus(null);
     }
   };
